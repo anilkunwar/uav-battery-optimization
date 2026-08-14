@@ -2819,13 +2819,19 @@ def build_concept_genealogy(
 
 
 @st.cache_data(ttl=3600, show_spinner=False)
+@st.cache_data(ttl=3600, show_spinner=False)
 def detect_cross_domain_bridges(
     _nx_graph: nx.Graph,
     valid_concepts: List[str],
     concept_abstract_map: Dict[str, List[int]],
 ) -> pd.DataFrame:
+    _BRIDGE_COLUMNS = [
+        "concept", "bridge_score", "betweenness",
+        "connected_categories", "categories",
+        "degree", "own_category",
+    ]
     if _nx_graph.number_of_nodes() < 5:
-        return pd.DataFrame()
+        return pd.DataFrame(columns=_BRIDGE_COLUMNS)
     category_map = {c: categorize_battery_concept(c) for c in valid_concepts}
     try:
         betweenness = nx.betweenness_centrality(_nx_graph, weight='weight')
@@ -2853,9 +2859,13 @@ def detect_cross_domain_bridges(
             "degree": len(neighbors),
             "own_category": own_cat,
         })
-    return pd.DataFrame(bridge_data).sort_values(
-        "bridge_score", ascending=False
-    )
+    if not bridge_data:
+        return pd.DataFrame(columns=_BRIDGE_COLUMNS)
+    df = pd.DataFrame(bridge_data)
+    # Defensive: ensure column exists before sorting
+    if "bridge_score" not in df.columns:
+        df["bridge_score"] = 0.0
+    return df.sort_values("bridge_score", ascending=False).reset_index(drop=True)
 
 
 @st.cache_data(ttl=3600, show_spinner=False)
