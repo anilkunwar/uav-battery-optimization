@@ -1,1 +1,1 @@
-
+unmanned aerial vehicle OR Drones AND Batteries OR Energy Storage Device OR Lithium Ion Battery OR Rechargeable Battery AND Flight Control OR Trajectory Optimization AND Thermal Management AND Hardware AND Charging OR Maintenance Protocol
