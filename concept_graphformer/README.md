@@ -8,3 +8,5 @@ Concept GraphFormer
 
 
 [![meaningtowords](https://img.shields.io/badge/batteryindronesgraphformer-v1.0-yellow)](https://battery-optmization-in-drone1.streamlit.app/) ( generic 2 with no categorical priorities, sankey and other diagrams)
+
+[![meaningtowords](https://img.shields.io/badge/batteryindronesgraphformer-v2.0-yellow)](https://battery-optmization-in-drone2.streamlit.app/) ( categorical priorities based upon queries, sankey and other diagrams)
