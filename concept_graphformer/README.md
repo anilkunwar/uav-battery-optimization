@@ -4,7 +4,8 @@ Csv to Json Conversion
 
 [![meaningtowords](https://img.shields.io/badge/dbcsvtojson-v1.0-orange)](https://uavbatteries-metadata-csvtojson1.streamlit.app/) ( Converts CSV to Json )
 
-Concept GraphFormer
+Concept GraphFormer (Four Categories of Battery Modeling in Drones: I HARDWARE AND SYSTEM ARCHITECTURE, II FLIGHT CONTROL AND TRAJECTORY OPTIMIZATION, III THERMAL MANAGEMENT, IV 
+CHARGING AND MAINTENANCE PROTOCOL )
 
 
 [![meaningtowords](https://img.shields.io/badge/batteryindronesgraphformer-v1.0-yellow)](https://battery-optmization-in-drone1.streamlit.app/) ( generic 2 with no categorical priorities, sankey and other diagrams)
