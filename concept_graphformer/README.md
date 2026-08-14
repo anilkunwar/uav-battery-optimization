@@ -2,7 +2,7 @@
 
 Csv to Json Conversion
 
-[![meaningtowords](https://img.shields.io/badge/tdtcsvtojson-v1.0-orange)](https://uavbatteries-metadata-csvtojson1.streamlit.app/) ( Converts CSV to Json )
+[![meaningtowords](https://img.shields.io/badge/dbcsvtojson-v1.0-orange)](https://uavbatteries-metadata-csvtojson1.streamlit.app/) ( Converts CSV to Json )
 
 Concept GraphFormer
 
