@@ -1,10 +1,3 @@
-Here is the fully updated Streamlit application code. 
-
-### Key Additions:
-1. **⚡ Compute Efficiency Monitor**: Uses Python's built-in `tracemalloc` alongside `psutil` (if available in the cloud environment) to accurately track Wall Time, Peak/Current RAM, Grid Array memory overhead, and CPU utilization. It displays a live metrics dashboard after each run.
-2. **📐 Initial Domain Sketch**: A dynamic 2D cross-sectional diagram (X-Z plane) that updates in real-time as you adjust the sidebar parameters. It maps out the **LiPo Core**, **Ambient Air domain**, **Hotspot Trigger**, and visualizes the boundary conditions (Convection/Radiation) and **Anisotropic Conductivity** ($k_x, k_y$ vs $k_z$).
-
-```python
 # =============================================================================
 # Streamlit App: FPV LiPo 3D Thermal Runaway Multi‑Simulation Platform
 # =============================================================================
@@ -1392,4 +1385,4 @@ with st.expander("🔬 Theoretical Soundness & Advanced Analysis", expanded=Fals
     """)
 
 st.caption("🔥 Multi‑Simulation Thermal Runaway Platform • 2026 • Fully upgraded")
-```
+
