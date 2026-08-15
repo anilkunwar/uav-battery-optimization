@@ -723,7 +723,7 @@ def step_cfd_lite(T, U, V, W, P, C, alphas, dt,
     return T_new, U_new, V_new, W_new, P, C_new, alphas_new
 
 # -----------------------------------------------------------------------------
-# 8.5 Domain Sketch Functions (2D & 3D) – with increased font sizes
+# 8.5 Domain Sketch Functions (2D & 3D) – with increased font sizes and FIXED Plotly API
 # -----------------------------------------------------------------------------
 def plot_initial_domain_sketch(params):
     """Generate a 2D X-Z cross-section sketch of the initial thermal domain."""
@@ -829,7 +829,9 @@ def _add_physical_arrow(fig, base, axis, sign, length, color,
         opacity=0.9, hoverinfo='skip', showlegend=False))
 
 def plot_3d_domain_sketch(params):
-    """Interactive 3D geometry sketch with physically-proportioned arrows and larger fonts."""
+    """Interactive 3D geometry sketch with physically-proportioned arrows and larger fonts.
+       FIXED: uses nested title=dict(text=..., font=...) for Plotly ≥5.0.
+    """
     Lx, Ly, Lz = params['Lx'], params['Ly'], params['Lz']
     Nx = params['Nx']
     r_phys = params['trigger_radius'] * (Lx / (Nx - 1))
@@ -877,12 +879,27 @@ def plot_3d_domain_sketch(params):
     m = arrow_len * 1.3  # margin so arrows fit inside the axes
     fig.update_layout(
         scene=dict(
-            xaxis=dict(title='x (m)', range=[-m, Lx + m], backgroundcolor='white', gridcolor='#eeeeee',
-                       titlefont=dict(size=16), tickfont=dict(size=14)),
-            yaxis=dict(title='y (m)', range=[-m, Ly + m], backgroundcolor='white', gridcolor='#eeeeee',
-                       titlefont=dict(size=16), tickfont=dict(size=14)),
-            zaxis=dict(title='z (m)', range=[-m, Lz + m], backgroundcolor='white', gridcolor='#eeeeee',
-                       titlefont=dict(size=16), tickfont=dict(size=14)),
+            xaxis=dict(
+                title=dict(text='x (m)', font=dict(size=16)),
+                range=[-m, Lx + m],
+                backgroundcolor='white',
+                gridcolor='#eeeeee',
+                tickfont=dict(size=14)
+            ),
+            yaxis=dict(
+                title=dict(text='y (m)', font=dict(size=16)),
+                range=[-m, Ly + m],
+                backgroundcolor='white',
+                gridcolor='#eeeeee',
+                tickfont=dict(size=14)
+            ),
+            zaxis=dict(
+                title=dict(text='z (m)', font=dict(size=16)),
+                range=[-m, Lz + m],
+                backgroundcolor='white',
+                gridcolor='#eeeeee',
+                tickfont=dict(size=14)
+            ),
             aspectmode='data'),
         title=dict(text='🔥 3D LiPo Cell Geometry & Boundary Conditions', x=0.5, font=dict(size=18)),
         height=700, margin=dict(l=0, r=0, b=0, t=40),
@@ -1515,7 +1532,7 @@ if operation_mode == "Run New Simulation":
 
     label = st.sidebar.text_input("Run Label (optional)", value=f"h={h_conv:.1f} trig={trigger_temp:.0f}K")
 
-    # --- 3D DOMAIN SKETCH (UPGRADED with larger fonts) ---
+    # --- 3D DOMAIN SKETCH (UPGRADED with larger fonts, FIXED Plotly API) ---
     st.subheader("📐 Initial Domain Sketch (3D Interactive)")
     sketch_params = {
         'Lx': Lx, 'Ly': Ly, 'Lz': Lz,
@@ -1647,7 +1664,6 @@ if operation_mode == "Run New Simulation":
                 show_slice_y = st.checkbox("Show Y-Slice", True)
                 show_slice_z = st.checkbox("Show Z-Slice", True)
             with col3:
-                # Slicing positions (0.0 to 1.0)
                 slice_x_frac = st.slider("X-Slice Position", 0.0, 1.0, 0.5, 0.05)
                 slice_y_frac = st.slider("Y-Slice Position", 0.0, 1.0, 0.5, 0.05)
                 slice_z_frac = st.slider("Z-Slice Position", 0.0, 1.0, 0.5, 0.05)
@@ -1694,12 +1710,21 @@ if operation_mode == "Run New Simulation":
                 z_idx = int(Nz * slice_z_frac)
                 fig3d.add_trace(go.Surface(x=X, y=Y, z=T_final[:, :, z_idx], colorscale=plotly_cmap, showscale=False, opacity=0.9))
 
-        # Increase axis font sizes in the 3D scene
+        # FIXED: use nested title for axis labels
         fig3d.update_layout(
             scene=dict(
-                xaxis=dict(title='x (m)', tickfont=dict(size=font_size_3d), titlefont=dict(size=font_size_3d+2)),
-                yaxis=dict(title='y (m)', tickfont=dict(size=font_size_3d), titlefont=dict(size=font_size_3d+2)),
-                zaxis=dict(title='z (m)', tickfont=dict(size=font_size_3d), titlefont=dict(size=font_size_3d+2)),
+                xaxis=dict(
+                    title=dict(text='x (m)', font=dict(size=font_size_3d+2)),
+                    tickfont=dict(size=font_size_3d)
+                ),
+                yaxis=dict(
+                    title=dict(text='y (m)', font=dict(size=font_size_3d+2)),
+                    tickfont=dict(size=font_size_3d)
+                ),
+                zaxis=dict(
+                    title=dict(text='z (m)', font=dict(size=font_size_3d+2)),
+                    tickfont=dict(size=font_size_3d)
+                ),
                 aspectmode='data',
                 bgcolor='rgb(240, 240, 240)'
             ),
@@ -1739,12 +1764,9 @@ if operation_mode == "Run New Simulation":
             )
             
             if len(px) > 0:
-                # Convert opacity to RGBA color strings for Plotly
                 colors = [f'rgba(120, 120, 120, {o*0.6})' for o in opacities]
                 
                 fig_smoke = go.Figure()
-                # Add the battery geometry (reuse from 3D studio? We'll add a simple wireframe)
-                # For clarity, we'll just show the smoke.
                 fig_smoke.add_trace(go.Scatter3d(
                     x=px, y=py, z=pz,
                     mode='markers',
@@ -1755,11 +1777,12 @@ if operation_mode == "Run New Simulation":
                     ),
                     name='Venting Smoke (Lagrangian)'
                 ))
+                # FIXED: nested title for axis labels
                 fig_smoke.update_layout(
                     scene=dict(
-                        xaxis=dict(title='x (m)', tickfont=dict(size=12), titlefont=dict(size=14)),
-                        yaxis=dict(title='y (m)', tickfont=dict(size=12), titlefont=dict(size=14)),
-                        zaxis=dict(title='z (m)', tickfont=dict(size=12), titlefont=dict(size=14)),
+                        xaxis=dict(title=dict(text='x (m)', font=dict(size=14)), tickfont=dict(size=12)),
+                        yaxis=dict(title=dict(text='y (m)', font=dict(size=14)), tickfont=dict(size=12)),
+                        zaxis=dict(title=dict(text='z (m)', font=dict(size=14)), tickfont=dict(size=12)),
                         aspectmode='data'
                     ),
                     title=dict(text='💨 Smoke Plume (Lagrangian Particles)', font=dict(size=16)),
@@ -1773,10 +1796,8 @@ if operation_mode == "Run New Simulation":
 
         else:  # Eulerian CFD-Lite
             if sim_data['metadata'].get('cfd_used', False):
-                # Extract the smoke concentration field C from final_3D
-                # final_3D is (T, U, V, W, P, C, alphas) if CFD used
                 if len(sim_data['final_3D']) == 7:
-                    C_final = sim_data['final_3D'][5]  # index 5 is C
+                    C_final = sim_data['final_3D'][5]
                     fig_cfd = go.Figure(data=go.Volume(
                         x=Xg.flatten(), y=Yg.flatten(), z=Zg.flatten(),
                         value=C_final.flatten(),
@@ -1786,11 +1807,12 @@ if operation_mode == "Run New Simulation":
                         colorscale='Reds',
                         caps=dict(x_show=False, y_show=False, z_show=False)
                     ))
+                    # FIXED: nested title for axis labels
                     fig_cfd.update_layout(
                         scene=dict(
-                            xaxis=dict(title='x (m)', tickfont=dict(size=12), titlefont=dict(size=14)),
-                            yaxis=dict(title='y (m)', tickfont=dict(size=12), titlefont=dict(size=14)),
-                            zaxis=dict(title='z (m)', tickfont=dict(size=12), titlefont=dict(size=14)),
+                            xaxis=dict(title=dict(text='x (m)', font=dict(size=14)), tickfont=dict(size=12)),
+                            yaxis=dict(title=dict(text='y (m)', font=dict(size=14)), tickfont=dict(size=12)),
+                            zaxis=dict(title=dict(text='z (m)', font=dict(size=14)), tickfont=dict(size=12)),
                             aspectmode='data'
                         ),
                         title=dict(text='💨 Smoke Concentration (Eulerian CFD)', font=dict(size=16)),
@@ -2087,7 +2109,6 @@ if st.sidebar.button("📦 Generate Export", type="primary"):
             st.sidebar.success("CSV Export ready!")
 
         elif export_format == "FDS Venting BC (.fds)":
-            # Export the first simulation only (or all as separate files)
             sim_id, sim_data = next(iter(all_sims.items()))
             fds_filename = export_fds_venting_bc(sim_data, "lipo_venting_bc.fds")
             with open(fds_filename, 'r') as f:
