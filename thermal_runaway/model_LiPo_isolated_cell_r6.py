@@ -1204,7 +1204,7 @@ if operation_mode == "Run New Simulation":
         safe_T_limit = st.slider("Safety Cutoff Temp (K)", 1000, 2000, 1500, 50,
                                  help="Abort simulation if T_max exceeds this to prevent NaN/infinity errors.")
 
-    label = st.sidebar.text_input("Run Label (optional)", value=f"h={h_conv:.1f} trig={trigger_temp:.0f}K"), value=f"h={h_conv:.1f} trig={trigger_temp:.0f}K")
+    label = st.sidebar.text_input("Run Label (optional)", value=f"h={h_conv:.1f} trig={trigger_temp:.0f}K")
 
     # --- 3D DOMAIN SKETCH (UPGRADED) ---
     st.subheader("📐 Initial Domain Sketch (3D Interactive)")
