@@ -9,5 +9,8 @@
 
 [![meaningtowords](https://img.shields.io/badge/thermarunawaybattery-v4.0-green)](https://isolated-cell-lipo-thermal-runaway-model4.streamlit.app/) (progress bar will not jump beyond 0 % in  simulations v1, v2, v3 and v4 , progress monitor, 3D rendering, robust postprocessing available in the app)
 
+simulation runs from v5 and beyond
 
 [![meaningtowords](https://img.shields.io/badge/thermarunawaybattery-v5.0-green)](https://isolated-cell-lipo-thermal-runaway-model5.streamlit.app/) ( progress bar in simulation v5 will jump to 1-2% almost immediately , fixes CFL timestep , adaptive dt and throttling the UI i.e. Progress callback only shows up every 200 steps, progress monitor, 3D rendering, robust postprocessing available in the app)
+
+[![meaningtowords](https://img.shields.io/badge/thermarunawaybattery-v5.0-green)](https://isolated-cell-lipo-thermal-runaway-model5.streamlit.app/) ( progress bar in simulation v5 will jump to 1-2% almost immediately , fixes CFL timestep , adaptive dt and throttling the UI i.e. Progress callback only shows up every 200 steps, sidebar for variation of these numerical finetuning cfl, progress monitor, 3D rendering, robust postprocessing available in the app)
