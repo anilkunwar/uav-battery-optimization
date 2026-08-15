@@ -646,27 +646,30 @@ def plot_initial_domain_sketch(params):
     return fig
 
 def plot_3d_domain_sketch(params):
-    """Interactive 3D geometry sketch of the LiPo cell, hotspot, and boundary conditions."""
+    """Interactive 3D geometry sketch — corrected cone sizing."""
     Lx, Ly, Lz = params['Lx'], params['Ly'], params['Lz']
     Nx = params['Nx']
     dx = Lx / (Nx - 1)
     r_phys = params['trigger_radius'] * dx
-    
+
+    # --- FIX 1: Scale arrows to the *smallest* dimension so they never exceed a face ---
+    arrow_len = min(Lx, Ly, Lz) * 0.35   # ~35% of the thinnest side (was 25% of largest)
+
     # --- Cell bounding box (wireframe) ---
     x_b = [0, Lx, Lx, 0, 0, 0, Lx, Lx, 0, 0, Lx, Lx, Lx, Lx, 0, 0]
     y_b = [0, 0, Ly, Ly, 0, 0, 0, Ly, Ly, 0, 0, 0, Ly, Ly, Ly, Ly]
     z_b = [0, 0, 0, 0, 0, Lz, Lz, Lz, Lz, Lz, Lz, 0, 0, Lz, Lz, 0]
-    
-    # --- Hotspot sphere (parametric) ---
+
+    # --- Hotspot sphere ---
     u = np.linspace(0, 2 * np.pi, 30)
     v = np.linspace(0, np.pi, 30)
     x_s = Lx/2 + r_phys * np.outer(np.cos(u), np.sin(v))
     y_s = Ly/2 + r_phys * np.outer(np.sin(u), np.sin(v))
     z_s = Lz/2 + r_phys * np.outer(np.ones(np.size(u)), np.cos(v))
-    
+
     fig = go.Figure()
-    
-    # Wireframe cell
+
+    # Wireframe
     fig.add_trace(go.Scatter3d(
         x=x_b, y=y_b, z=z_b,
         mode='lines',
@@ -674,8 +677,8 @@ def plot_3d_domain_sketch(params):
         name='LiPo Cell Boundary',
         hoverinfo='skip'
     ))
-    
-    # Cell core (transparent filled surface)
+
+    # Transparent core
     fig.add_trace(go.Mesh3d(
         x=[0, Lx, Lx, 0, 0, Lx, Lx, 0],
         y=[0, 0, Ly, Ly, 0, 0, Ly, Ly],
@@ -683,19 +686,18 @@ def plot_3d_domain_sketch(params):
         i=[0, 0, 4, 4, 2, 2, 5, 5, 1, 1, 3, 3],
         j=[1, 2, 5, 6, 3, 0, 1, 4, 5, 4, 7, 6],
         k=[2, 3, 6, 7, 0, 1, 4, 0, 4, 5, 6, 2],
-        color='#3498db', opacity=0.15, flatshading=True,
+        color='#3498db', opacity=0.12, flatshading=True,
         name='Cell Core', hovertemplate='Core<extra></extra>', showscale=False
     ))
-    
+
     # Hotspot
     fig.add_trace(go.Surface(
         x=x_s, y=y_s, z=z_s,
         colorscale=[[0, '#e74c3c'], [1, '#e74c3c']],
-        showscale=False, opacity=0.6, name='Hotspot Trigger'
+        showscale=False, opacity=0.5, name='Hotspot Trigger'
     ))
-    
-    # Boundary condition arrows (cones) on 6 faces
-    arrow_len = max(Lx, Ly, Lz) * 0.25
+
+    # --- FIX 2: Smaller, thinner cones with explicit sizeref ---
     cones = {
         'Top (+Z)':    {'x':[Lx/2], 'y':[Ly/2], 'z':[Lz],       'u':[0], 'v':[0], 'w':[1]},
         'Bottom (-Z)': {'x':[Lx/2], 'y':[Ly/2], 'z':[0],         'u':[0], 'v':[0], 'w':[-1]},
@@ -712,43 +714,42 @@ def plot_3d_domain_sketch(params):
             w=[v*arrow_len for v in c['w']],
             colorscale=[[0, '#e67e22'], [1, '#e67e22']],
             showscale=False, name=f'Heat Loss: {name}',
-            anchor='tip', sizemode='absolute', opacity=0.8
+            anchor='tip', sizemode='absolute', sizeref=0.3,  # ← FIX 2: thin cones
+            opacity=0.8
         ))
-    
+
     # Anisotropic conductivity annotations
     fig.add_trace(go.Scatter3d(
         x=[Lx*0.8, Lx*0.95], y=[Ly/2, Ly/2], z=[Lz/2, Lz/2],
         mode='lines+text',
-        line=dict(color='#2980b9', width=6),
+        line=dict(color='#2980b9', width=5),
         text=['', 'kₓ, kᵧ (High)'],
         textposition='top center',
-        textfont=dict(color='#2980b9', size=12),
+        textfont=dict(color='#2980b9', size=11),
         hoverinfo='skip', showlegend=False
     ))
     fig.add_trace(go.Scatter3d(
         x=[Lx/2, Lx/2], y=[Ly/2, Ly/2], z=[Lz*0.8, Lz*0.95],
         mode='lines+text',
-        line=dict(color='#27ae60', width=6),
+        line=dict(color='#27ae60', width=5),
         text=['', 'kᵤ (Low)'],
         textposition='middle right',
-        textfont=dict(color='#27ae60', size=12),
+        textfont=dict(color='#27ae60', size=11),
         hoverinfo='skip', showlegend=False
     ))
-    
+
     fig.update_layout(
         scene=dict(
-            xaxis=dict(title='x (m)', range=[-0.01, Lx+0.01], backgroundcolor='white', gridcolor='#eeeeee'),
-            yaxis=dict(title='y (m)', range=[-0.01, Ly+0.01], backgroundcolor='white', gridcolor='#eeeeee'),
-            zaxis=dict(title='z (m)', range=[-0.01, Lz+0.01], backgroundcolor='white', gridcolor='#eeeeee'),
+            xaxis=dict(title='x (m)', range=[-0.005, Lx+0.005], backgroundcolor='white', gridcolor='#eeeeee'),
+            yaxis=dict(title='y (m)', range=[-0.005, Ly+0.005], backgroundcolor='white', gridcolor='#eeeeee'),
+            zaxis=dict(title='z (m)', range=[-0.005, Lz+0.005], backgroundcolor='white', gridcolor='#eeeeee'),
             aspectmode='data'
         ),
         title=dict(text='🔥 3D LiPo Cell Geometry & Boundary Conditions', x=0.5),
-        height=700, margin=dict(l=0, r=0, b=0, t=40),
+        height=650, margin=dict(l=0, r=0, b=0, t=40),
         legend=dict(yanchor='top', y=0.99, xanchor='left', x=0.01)
     )
-    return fig
-
-# -----------------------------------------------------------------------------
+    return fig# -----------------------------------------------------------------------------
 # 9. Simulation Runner – with progress bar and efficiency tracking (NEW)
 # -----------------------------------------------------------------------------
 def run_simulation(params, progress_callback=None):
