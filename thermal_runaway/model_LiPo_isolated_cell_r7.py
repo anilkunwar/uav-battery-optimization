@@ -1204,7 +1204,7 @@ if operation_mode == "Run New Simulation":
         safe_T_limit = st.slider("Safety Cutoff Temp (K)", 1000, 2000, 1500, 50,
                                  help="Abort simulation if T_max exceeds this to prevent NaN/infinity errors.")
 
-    label = st.sidebar.text_input("Run Label (optional)", value=f"h={h_conv:.1f} trig={trigger_temp:.0f}K"), value=f"h={h_conv:.1f} trig={trigger_temp:.0f}K")
+    label = st.sidebar.text_input("Run Label (optional)", value=f"h={h_conv:.1f} trig={trigger_temp:.0f}K")
 
     # --- 3D DOMAIN SKETCH (UPGRADED) ---
     st.subheader("📐 Initial Domain Sketch (3D Interactive)")
@@ -1310,7 +1310,7 @@ if operation_mode == "Run New Simulation":
         T_final = sim_data['final_3D'][0]
         ext = sim_data['metadata']['extents']
         mid_z = sim_data['metadata']['mesh_shape'][2] // 2
-                alphas_final = sim_data['final_3D'][1]
+        alphas_final = sim_data['final_3D'][1]
         mesh_shape = sim_data['metadata']['mesh_shape']
 
         st.subheader("🔬 Advanced 3D Volumetric Studio (COMSOL-style)")
@@ -1389,7 +1389,8 @@ if operation_mode == "Run New Simulation":
             margin=dict(l=0, r=0, b=0, t=40)
         )
         st.plotly_chart(fig3d, use_container_width=True)
-st.subheader("Time Evolution Slider")
+        if len(sim_data['history']) > 1:
+            st.subheader("Time Evolution Slider")
             frames = []
             for entry in sim_data['history']:
                 T_mid = entry['T_mid']
@@ -1538,38 +1539,37 @@ def generate_vts_string(T, alphas, extents, time_val):
     dy = (extents['y'][1]-extents['y'][0])/(Ny-1)
     dz = (extents['z'][1]-extents['z'][0])/(Nz-1)
     
-    # Flatten in Fortran order for VTK
     T_flat = T.flatten(order='F')
-    alpha_flat = alphas[0].flatten(order='F') # Just export SEI alpha for now
+    alpha_flat = alphas[0].flatten(order='F')
     
-    xml_str = f"""<?xml version="1.0"?>
-<VTKFile type="StructuredGrid" version="0.1" byte_order="LittleEndian">
-  <StructuredGrid WholeExtent="0 {Nx-1} 0 {Ny-1} 0 {Nz-1}">
-    <Piece Extent="0 {Nx-1} 0 {Ny-1} 0 {Nz-1}">
-      <PointData Scalars="Temperature">
-        <DataArray type="Float64" Name="Temperature" format="ascii">
-{' '.join(map(str, T_flat))}
-        </DataArray>
-        <DataArray type="Float64" Name="SEI_Alpha" format="ascii">
-{' '.join(map(str, alpha_flat))}
-        </DataArray>
-      </PointData>
-      <CellData></CellData>
-      <Points>
-        <DataArray type="Float32" NumberOfComponents="3" format="ascii">
-"""
+    lines = ['<?xml version="1.0"?>',
+             '<VTKFile type="StructuredGrid" version="0.1" byte_order="LittleEndian">',
+             f'  <StructuredGrid WholeExtent="0 {Nx-1} 0 {Ny-1} 0 {Nz-1}">',
+             f'    <Piece Extent="0 {Nx-1} 0 {Ny-1} 0 {Nz-1}">',
+             '      <PointData Scalars="Temperature">',
+             '        <DataArray type="Float64" Name="Temperature" format="ascii">',
+             ' '.join(map(str, T_flat)),
+             '        </DataArray>',
+             '        <DataArray type="Float64" Name="SEI_Alpha" format="ascii">',
+             ' '.join(map(str, alpha_flat)),
+             '        </DataArray>',
+             '      </PointData>',
+             '      <CellData></CellData>',
+             '      <Points>',
+             '        <DataArray type="Float32" NumberOfComponents="3" format="ascii">']
+    
     points = []
     for k in range(Nz):
         for j in range(Ny):
             for i in range(Nx):
                 points.append(f"{i*dx} {j*dy} {k*dz}")
-    xml_str += ' '.join(points) + """
-        </DataArray>
-      </Points>
-    </Piece>
-  </StructuredGrid>
-</VTKFile>"""
-    return xml_str
+    lines.append(' '.join(points))
+    lines.extend(['        </DataArray>',
+                  '      </Points>',
+                  '    </Piece>',
+                  '  </StructuredGrid>',
+                  '</VTKFile>'])
+    return '\n'.join(lines)
 
 st.sidebar.header("💾 Export Options")
 export_format = st.sidebar.selectbox(
@@ -1586,28 +1586,25 @@ if st.sidebar.button("📦 Generate Export", type="primary"):
         if export_format == "VTK for ParaView (.vts/.pvd)":
             buffer = BytesIO()
             with zipfile.ZipFile(buffer, "w", zipfile.ZIP_DEFLATED) as zf:
-                pvd_content = '<?xml version="1.0"?>
-<VTKFile type="Collection" version="0.1">
-  <Collection>
-'
+                pvd_lines = ['<?xml version="1.0"?>',
+                             '<VTKFile type="Collection" version="0.1">',
+                             '  <Collection>']
                 for sim_id, sim_data in all_sims.items():
                     folder = f"sim_{sim_id}"
                     T_final, alpha_final = sim_data['final_3D']
                     ext = sim_data['metadata']['extents']
                     t = sim_data['metadata']['final_time']
                     
-                    # Write final state VTS
                     vts_str = generate_vts_string(T_final, alpha_final, ext, t)
                     vts_filename = f"{folder}/final_state.vts"
                     zf.writestr(vts_filename, vts_str)
-                    pvd_content += f'    <DataSet timestep="{t}" group="" part="0" file="{vts_filename}"/>
-'
+                    pvd_lines.append(f'    <DataSet timestep="{t}" group="" part="0" file="{vts_filename}"/>')
                     
-                pvd_content += '  </Collection>
-</VTKFile>'
-                zf.writestr("paraview_scene.pvd", pvd_content)
+                pvd_lines.extend(['  </Collection>', '</VTKFile>'])
+                zf.writestr("paraview_scene.pvd", '\n'.join(pvd_lines))
             buffer.seek(0)
-            st.sidebar.download_button("📥 Download VTK ZIP", buffer.getvalue(), f"vtk_export_{datetime.now().strftime('%Y%m%d_%H%M%S')}.zip", "application/zip")
+            ts = datetime.now().strftime('%Y%m%d_%H%M%S')
+            st.sidebar.download_button("📥 Download VTK ZIP", buffer.getvalue(), f"vtk_export_{ts}.zip", "application/zip")
             st.sidebar.success("VTK Export ready! Unzip and open the .pvd file in ParaView.")
 
         elif export_format == "Raw Numpy Arrays (.npy/.pkl)":
@@ -1617,7 +1614,6 @@ if st.sidebar.button("📦 Generate Export", type="primary"):
                     folder = f"sim_{sim_id}"
                     T_final, alpha_final = sim_data['final_3D']
                     
-                    # NPY export (Final state)
                     np_bytes = BytesIO()
                     np.save(np_bytes, T_final)
                     zf.writestr(f"{folder}/T_final.npy", np_bytes.getvalue())
@@ -1631,7 +1627,8 @@ if st.sidebar.button("📦 Generate Export", type="primary"):
                     pickle.dump(sim_data, pkl_bytes)
                     zf.writestr(f"{folder}/full_data.pkl", pkl_bytes.getvalue())
             buffer.seek(0)
-            st.sidebar.download_button("📥 Download Numpy ZIP", buffer.getvalue(), f"numpy_export_{datetime.now().strftime('%Y%m%d_%H%M%S')}.zip", "application/zip")
+            ts = datetime.now().strftime('%Y%m%d_%H%M%S')
+            st.sidebar.download_button("📥 Download Numpy ZIP", buffer.getvalue(), f"numpy_export_{ts}.zip", "application/zip")
             st.sidebar.success("Numpy/PKL Export ready!")
 
         elif export_format == "Complete Package (ZIP)":
@@ -1650,7 +1647,8 @@ if st.sidebar.button("📦 Generate Export", type="primary"):
                         })
                         zf.writestr(f"{folder}/frame_{i:04d}.csv", df.to_csv(index=False))
                 buffer.seek(0)
-            st.sidebar.download_button("📥 Download ZIP", buffer.getvalue(), f"thermal_simulations_{datetime.now().strftime('%Y%m%d_%H%M%S')}.zip", "application/zip")
+            ts = datetime.now().strftime('%Y%m%d_%H%M%S')
+            st.sidebar.download_button("📥 Download ZIP", buffer.getvalue(), f"thermal_simulations_{ts}.zip", "application/zip")
             st.sidebar.success("Export ready!")
 
         elif export_format == "Raw Data CSV":
@@ -1665,9 +1663,9 @@ if st.sidebar.button("📦 Generate Export", type="primary"):
                         })
                         zf.writestr(f"{folder}/frame_{i:04d}.csv", df.to_csv(index=False))
             buffer.seek(0)
-            st.sidebar.download_button("📥 Download CSV ZIP", buffer.getvalue(), f"csv_export_{datetime.now().strftime('%Y%m%d_%H%M%S')}.zip", "application/zip")
-            st.sidebar.success("CSV Export ready!")
-# -----------------------------------------------------------------------------
+            ts = datetime.now().strftime('%Y%m%d_%H%M%S')
+            st.sidebar.download_button("📥 Download CSV ZIP", buffer.getvalue(), f"csv_export_{ts}.zip", "application/zip")
+            st.sidebar.success("CSV Export ready!")# -----------------------------------------------------------------------------
 # 13. Theoretical Documentation
 # -----------------------------------------------------------------------------
 with st.expander("🔬 Theoretical Soundness & Advanced Analysis", expanded=False):
