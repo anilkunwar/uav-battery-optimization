@@ -1310,7 +1310,7 @@ if operation_mode == "Run New Simulation":
         T_final = sim_data['final_3D'][0]
         ext = sim_data['metadata']['extents']
         mid_z = sim_data['metadata']['mesh_shape'][2] // 2
-                alphas_final = sim_data['final_3D'][1]
+        alphas_final = sim_data['final_3D'][1]
         mesh_shape = sim_data['metadata']['mesh_shape']
 
         st.subheader("🔬 Advanced 3D Volumetric Studio (COMSOL-style)")
