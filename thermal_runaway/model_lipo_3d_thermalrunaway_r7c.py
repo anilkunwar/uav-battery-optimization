@@ -589,7 +589,8 @@ def initialize_reaction_degrees(Nx, Ny, Nz, trigger_radius, trigger_center=None)
     dist = np.sqrt((i - cx)**2 + (j - cy)**2 + (k - cz)**2)
     mask = dist <= trigger_radius
     r_norm = dist / max(trigger_radius, 1)
-    alphas[0, mask] = 0.95 - 0.3 * r_norm[mask]
+    # FIXED: all four reaction channels must start with alpha < 1
+    alphas[:, mask] = 0.95 - 0.3 * r_norm[mask]
     return alphas
 
 # -----------------------------------------------------------------------------
@@ -1743,10 +1744,10 @@ if operation_mode == "Run New Simulation":
     # ---- Time & Mesh ----
     with st.sidebar.expander("⏱️ Time & Mesh", expanded=True):
         sim_time = st.slider("Total Simulation Time (s)", 
-                             min_value=60, max_value=3600, value=600, step=30,
+                             min_value=60, max_value=3600, value=1200, step=30,
                              help="Real thermal runaway takes 5‑15 minutes")
         snapshot_interval = st.slider("3D Snapshot Interval (s)",
-                                      min_value=1, max_value=120, value=30, step=5,
+                                      min_value=1, max_value=120, value=60, step=5,
                                       help="How often to save 3D field for time slider")
         col1, col2, col3 = st.columns(3)
         with col1:
@@ -1771,12 +1772,12 @@ if operation_mode == "Run New Simulation":
         ky = st.number_input("k_y (W/m·K)", 5.0, 60.0, 25.0, 1.0)
         kz = st.number_input("k_z (W/m·K)", 0.5, 5.0, 1.5, 0.1)
         T_amb = st.number_input("Ambient T (K)", 250, 350, 298, 1)
-        h_conv = st.number_input("h_conv (W/m²·K)", 0.0, 50.0, 15.0, 1.0)
+        h_conv = st.number_input("h_conv (W/m²·K)", 0.0, 50.0, 5.0, 1.0)
         eps = st.number_input("Emissivity", 0.05, 0.95, 0.90, 0.05)
     
     with st.sidebar.expander("Heat & Trigger", expanded=True):
-        q_normal = st.number_input("Normal Heat (W/m³)", 0.0, 5e5, 5e4, 1e4, format="%.0f")
-        trigger_temp = st.number_input("Hotspot T (K)", 350, 2000, 450, 5,
+        q_normal = st.number_input("Normal Heat (W/m³)", 0.0, 5e5, 2e5, 1e4, format="%.0f")
+        trigger_temp = st.number_input("Hotspot T (K)", 350, 2000, 520, 5,
                                        help="Realistic SEI onset ~400‑450 K")
         trigger_radius = st.slider("Hotspot radius (cells)", 1, 10, 3)
     
