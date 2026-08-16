@@ -1,16 +1,17 @@
 # =============================================================================
 # Streamlit App: FPV LiPo 3D Thermal Runaway Multi‑Simulation Platform
 # =============================================================================
-# UPGRADED VERSION R8:
-#   - Fixed "flatshading" error in single‑slice 3D view
-#   - Cross‑section slices in multi‑slice view are now optional (checkbox)
+# UPGRADED VERSION R8+:
+#   - Fixed flatshading and colorbar syntax in Plotly
+#   - Mesh-visible single‑slice and multi‑slice views
+#   - Optional vertical cross‑slices in multi‑slice view
 #   - Z‑slice slider range dynamically adapts to mesh resolution
 #   - Realistic trigger temperature default 450 K
-#   - Mesh‑visible 3D visualisation (multi‑slice + wireframe)
 #   - 2D pcolormesh with edge colours
 #   - Pre‑simulation diagnostics
-#   - Fixed Plotly colorbar syntax (titleside → title=dict(...))
-#   - Slices now avoid boundaries (all requested slices are visible)
+#   - CFD‑Lite coupling for smoke advection (optional)
+#   - Smoke particle visualisation combined with thermal field
+#   - New tabbed UI layout
 # =============================================================================
 
 import streamlit as st
@@ -386,7 +387,7 @@ class SimulationDB:
         return hashlib.md5(param_str.encode()).hexdigest()[:8]
 
     @staticmethod
-    def save_simulation(sim_params, history, metadata, final_3D):
+    def save_simulation(sim_params, history, metadata, final_3D, cfd_data=None):
         if 'thermal_simulations' not in st.session_state:
             st.session_state.thermal_simulations = {}
         sim_id = SimulationDB.generate_id(sim_params)
@@ -396,6 +397,7 @@ class SimulationDB:
             'history': history,      
             'metadata': metadata,    
             'final_3D': final_3D,    
+            'cfd_data': cfd_data,    # optional (U,V,W,P,C)
             'created_at': datetime.now().isoformat()
         }
         return sim_id
@@ -516,7 +518,7 @@ class ThermalLineProfiler3D:
             return dist, profile, endpoints
 
 # -----------------------------------------------------------------------------
-# 8. Numba Kernel – with corrected boundary conditions
+# 8. Numba Kernel – thermal-only (original)
 # -----------------------------------------------------------------------------
 @njit(parallel=True, fastmath=True, cache=True)
 def step_3d(T, alphas, dt,
@@ -586,7 +588,21 @@ def step_3d(T, alphas, dt,
     return T_new, alphas_new
 
 # -----------------------------------------------------------------------------
-# 8.5 Domain Sketch Functions (2D & 3D) - unchanged
+# 8.5 CFD-Lite Kernel (stub for future implementation)
+# -----------------------------------------------------------------------------
+def step_cfd_lite(T, U, V, W, P, C, alphas, dt, rho_fluid, nu, beta, g, D_smoke,
+                  dx, dy, dz, q_normal, reaction_params, T_amb, h_conv, eps, sigma, R,
+                  T_vent, kx, ky, kz, rho_solid, Cp_solid):
+    """
+    Placeholder for a coupled CFD + thermal solver.
+    Currently returns fields unchanged; implement actual Navier-Stokes + advection-diffusion.
+    """
+    # TODO: Implement incompressible Navier-Stokes with Boussinesq, smoke advection.
+    # For now, just pass through.
+    return T, U, V, W, P, C, alphas
+
+# -----------------------------------------------------------------------------
+# 8.6 Domain Sketch Functions (2D & 3D) - unchanged
 # -----------------------------------------------------------------------------
 def plot_initial_domain_sketch(params):
     """Generate a 2D X-Z cross-section sketch of the initial thermal domain."""
@@ -750,10 +766,10 @@ def plot_3d_domain_sketch(params):
     return fig
 
 # =============================================================================
-# 8.6 FIXED: MESH-VISIBLE VISUALIZATION FUNCTIONS (with optional cross)
+# 8.7 FIXED MESH-VISIBLE VISUALIZATION FUNCTIONS (Plotly API compliant)
 # =============================================================================
 
-def create_mesh_aware_3d_thermal(T_3d, extents, style_params, 
+def create_mesh_aware_3d_thermal(T_3d, extents, style_params,
                                   show_mesh=True, mesh_opacity=0.3,
                                   slice_axis='z', slice_position=0.5):
     """
@@ -1150,6 +1166,103 @@ def create_multi_slice_3d_visualization(T_3d, extents, style_params, n_slices=5,
     return fig
 
 
+def create_smoke_thermal_combined_visualization(T_3d, smoke_xyz, extents, style_params,
+                                                 n_thermal_slices=3):
+    """
+    COMBINED visualization: Thermal field (mesh-visible) + Smoke particles (Lagrangian).
+    """
+    Nx, Ny, Nz = T_3d.shape
+    ext_x = extents['x']; ext_y = extents['y']; ext_z = extents['z']
+    x = np.linspace(ext_x[0], ext_x[1], Nx)
+    y = np.linspace(ext_y[0], ext_y[1], Ny)
+    z = np.linspace(ext_z[0], ext_z[1], Nz)
+   
+    cmap_name = style_params.get('cmap', 'hot')
+    pl_colorscale = matplotlib_to_plotly(cmap_name, pl_entries=20)
+   
+    colorbar_config = dict(
+        title=dict(text='Temperature (K)', side='right', font=dict(size=14)),
+        thickness=15, len=0.8
+    )
+   
+    fig = go.Figure()
+   
+    # 1. Add semi-transparent thermal slices (fewer to not obscure smoke)
+    z_slices = np.unique(np.linspace(Nz//3, 2*Nz//3, n_thermal_slices, dtype=int))
+    for idx, kz in enumerate(z_slices):
+        X, Y = np.meshgrid(x, y, indexing='ij')
+        Z_pos = np.full_like(X, z[kz])
+        is_last = (idx == len(z_slices) - 1)
+       
+        fig.add_trace(go.Surface(
+            x=X, y=Y, z=Z_pos, surfacecolor=T_3d[:, :, kz],
+            colorscale=pl_colorscale, showscale=is_last,
+            colorbar=colorbar_config if is_last else None,
+            opacity=0.35, name=f'Thermal Z={z[kz]*1000:.1f}mm'
+        ))
+   
+    # 2. Add smoke particles
+    px, py, pz, popacity = smoke_xyz
+    if len(px) > 0:
+        # Create smoke color gradient (gray to white based on opacity)
+        smoke_colors = []
+        for op in popacity:
+            gray_val = int(80 + 175 * op)  # 80 (dark) to 255 (white)
+            smoke_colors.append(f'rgba({gray_val},{gray_val},{gray_val},{max(0.05, op*0.6)})')
+       
+        fig.add_trace(go.Scatter3d(
+            x=px, y=py, z=pz,
+            mode='markers',
+            marker=dict(
+                size=2,
+                color=smoke_colors,
+                opacity=0.6
+            ),
+            name='Smoke Particles',
+            hoverinfo='skip'
+        ))
+   
+    # 3. Boundary box
+    box_lines = [
+        ([ext_x[0], ext_x[1]], [ext_y[0], ext_y[0]], [ext_z[0], ext_z[0]]),
+        ([ext_x[0], ext_x[1]], [ext_y[1], ext_y[1]], [ext_z[0], ext_z[0]]),
+        ([ext_x[0], ext_x[0]], [ext_y[0], ext_y[1]], [ext_z[0], ext_z[0]]),
+        ([ext_x[1], ext_x[1]], [ext_y[0], ext_y[1]], [ext_z[0], ext_z[0]]),
+        ([ext_x[0], ext_x[1]], [ext_y[0], ext_y[0]], [ext_z[1], ext_z[1]]),
+        ([ext_x[0], ext_x[1]], [ext_y[1], ext_y[1]], [ext_z[1], ext_z[1]]),
+        ([ext_x[0], ext_x[0]], [ext_y[0], ext_y[1]], [ext_z[1], ext_z[1]]),
+        ([ext_x[1], ext_x[1]], [ext_y[0], ext_y[1]], [ext_z[1], ext_z[1]]),
+        ([ext_x[0], ext_x[0]], [ext_y[0], ext_y[0]], [ext_z[0], ext_z[1]]),
+        ([ext_x[1], ext_x[1]], [ext_y[0], ext_y[0]], [ext_z[0], ext_z[1]]),
+        ([ext_x[0], ext_x[0]], [ext_y[1], ext_y[1]], [ext_z[0], ext_z[1]]),
+        ([ext_x[1], ext_x[1]], [ext_y[1], ext_y[1]], [ext_z[0], ext_z[1]]),
+    ]
+    for bx, by, bz in box_lines:
+        fig.add_trace(go.Scatter3d(
+            x=bx, y=by, z=bz, mode='lines',
+            line=dict(color='#2c3e50', width=2), showlegend=False, hoverinfo='skip'))
+   
+    # Extend Z range to show smoke plume above battery
+    z_max_smoke = max(pz) if len(pz) > 0 else ext_z[1]
+    z_plot_max = max(ext_z[1] * 1.5, z_max_smoke * 1.1)
+   
+    T_min, T_max = np.min(T_3d), np.max(T_3d)
+    fig.update_layout(
+        scene=dict(
+            xaxis=dict(title=dict(text='X (m)', font=dict(size=14))),
+            yaxis=dict(title=dict(text='Y (m)', font=dict(size=14))),
+            zaxis=dict(title=dict(text='Z (m)', font=dict(size=14)), range=[ext_z[0], z_plot_max]),
+            aspectmode='data', camera=dict(eye=dict(x=1.2, y=1.2, z=0.6))
+        ),
+        title=dict(
+            text=f'🔥 Thermal Field + 💨 Smoke Plume | T: {T_min:.1f} - {T_max:.1f} K | {len(px)} particles',
+            x=0.5, font=dict(size=16)),
+        height=750, margin=dict(l=0, r=0, b=0, t=50),
+        legend=dict(yanchor='top', y=0.99, xanchor='left', x=0.01, font=dict(size=11))
+    )
+    return fig
+
+
 def create_2d_heatmap_with_mesh(T_2d, extents_xy, style_params, 
                                  show_mesh=True, mesh_color='black',
                                  mesh_alpha=0.3, mesh_linewidth=0.5):
@@ -1206,12 +1319,14 @@ def create_2d_heatmap_with_mesh(T_2d, extents_xy, style_params,
     return fig
 
 # -----------------------------------------------------------------------------
-# 9. Simulation Runner – PATCHED (Dynamic solver controls)
+# 9. COMPLETE Simulation Runner (with CFD option)
 # -----------------------------------------------------------------------------
+
 def run_simulation(params, progress_callback=None):
+    """Complete simulation runner supporting both thermal-only and CFD modes."""
     tracemalloc.start()
     start_time = time.time()
-    
+   
     if HAS_PSUTIL:
         process = psutil.Process(os.getpid())
         mem_before = process.memory_info().rss / (1024**2)
@@ -1231,19 +1346,29 @@ def run_simulation(params, progress_callback=None):
     t_max = params['t_max']; sample_interval = params['sample_interval']
     trigger_temp = params['trigger_temp']; trigger_radius = params['trigger_radius']
     R = 8.314; sigma = 5.67e-8
-    
-    # --- DYNAMIC SOLVER PARAMS ---
+   
     cfl_factor = params.get('cfl_factor', 0.4)
     adapt_dt_thresh = params.get('adapt_dt_thresh', 600.0)
     adapt_dt_factor = params.get('adapt_dt_factor', 0.8)
     ui_throttle = params.get('ui_throttle', 200)
     safe_T_limit = params.get('safe_T_limit', 1500.0)
-
+    enable_cfd = params.get('enable_cfd', False)
+   
     dx = Lx / (Nx - 1); dy = Ly / (Ny - 1); dz = Lz / (Nz - 1)
     extents = {'x': (0, Lx), 'y': (0, Ly), 'z': (0, Lz)}
 
     T = np.ones((Nx, Ny, Nz), dtype=np.float64) * T_amb
     alphas = np.ones((4, Nx, Ny, Nz), dtype=np.float64)
+   
+    # CFD fields (if enabled)
+    if enable_cfd:
+        U = np.zeros((Nx, Ny, Nz), dtype=np.float64)
+        V = np.zeros((Nx, Ny, Nz), dtype=np.float64)
+        W = np.zeros((Nx, Ny, Nz), dtype=np.float64)
+        P = np.zeros((Nx, Ny, Nz), dtype=np.float64)
+        C = np.zeros((Nx, Ny, Nz), dtype=np.float64)
+    else:
+        U = V = W = P = C = None
 
     # Hotspot trigger
     cx, cy, cz = Nx//2, Ny//2, Nz//2
@@ -1254,15 +1379,13 @@ def run_simulation(params, progress_callback=None):
                 if (i-cx)**2 + (j-cy)**2 + (k-cz)**2 <= r**2:
                     T[i,j,k] = trigger_temp
 
-    # Calculate a mathematically stable timestep (CFL condition)
+    # Stable timestep
     alpha_x = kx / (rho * Cp)
     alpha_y = ky / (rho * Cp)
     alpha_z = kz / (rho * Cp)
     dt_cfl = cfl_factor / (alpha_x/dx**2 + alpha_y/dy**2 + alpha_z/dz**2)
-    
-    # Start with a safe timestep
     dt = min(dt_init, dt_cfl, dt_max)
-    
+   
     t = 0.0; step = 0
     times = []; T_max_history = []
     T_mid_history = []; alpha_mid_history = []
@@ -1270,17 +1393,30 @@ def run_simulation(params, progress_callback=None):
     mid_z = Nz // 2
 
     while t < t_max:
-        T, alphas = step_3d(T, alphas, dt,
-                           rho, Cp, kx, ky, kz, dx, dy, dz,
-                           q_normal, reaction_params, T_amb, h_conv, eps, sigma, R)
+        if enable_cfd and U is not None:
+            # CFD-Lite coupled solver
+            T, U, V, W, P, C, alphas = step_cfd_lite(
+                T, U, V, W, P, C, alphas, dt,
+                params.get('rho_fluid', 1.2), params.get('nu', 1.5e-5),
+                params.get('beta', 0.003), -9.81,
+                params.get('D_smoke', 1e-5),
+                dx, dy, dz, q_normal, reaction_params,
+                T_amb, h_conv, eps, sigma, R,
+                params.get('T_vent', 450.0),
+                kx, ky, kz, rho, Cp
+            )
+        else:
+            # Thermal-only solver
+            T, alphas = step_3d(T, alphas, dt,
+                               rho, Cp, kx, ky, kz, dx, dy, dz,
+                               q_normal, reaction_params, T_amb, h_conv, eps, sigma, R)
+       
         t += dt; step += 1
         T_max = np.max(T)
-        
-        # Smarter adaptive timestep
+       
         if T_max > adapt_dt_thresh:
             dt = max(dt_min, dt * adapt_dt_factor)
         else:
-            # Hold steady at the safe CFL limit
             dt = min(dt_cfl, dt_max)
 
         if t >= sample_next:
@@ -1289,11 +1425,10 @@ def run_simulation(params, progress_callback=None):
             T_mid_history.append(T[:, :, mid_z].copy())
             alpha_mid_history.append(alphas[0, :, :, mid_z].copy())
             sample_next += sample_interval
-            
+           
         if T_max > safe_T_limit or dt < dt_min * 0.5:
             break
-            
-        # Throttle the UI callback
+           
         if progress_callback is not None and step % ui_throttle == 0:
             progress_callback(min(t / t_max, 1.0))
 
@@ -1306,11 +1441,10 @@ def run_simulation(params, progress_callback=None):
             'alpha_mid': alpha_mid_history[idx]
         })
 
-    # Compute efficiency metrics
     current_mem, peak_mem = tracemalloc.get_traced_memory()
     tracemalloc.stop()
     end_time = time.time()
-    
+   
     if HAS_PSUTIL:
         mem_after = process.memory_info().rss / (1024**2)
         cpu_end = psutil.cpu_percent(interval=None)
@@ -1322,9 +1456,14 @@ def run_simulation(params, progress_callback=None):
         cpu_avg = None
         process_mem_mb = current_mem / (1024**2)
 
-    # Calculate theoretical array memory
-    array_mem_mb = (Nx * Ny * Nz * 8 * 5) / (1024**2)
-    
+    array_mem_mb = (Nx * Ny * Nz * 8 * (5 if not enable_cfd else 10)) / (1024**2)
+   
+    # Build final_3D tuple
+    if enable_cfd and U is not None:
+        final_3D = (T.copy(), U.copy(), V.copy(), W.copy(), P.copy(), C.copy(), alphas.copy())
+    else:
+        final_3D = (T.copy(), alphas.copy())
+   
     efficiency_stats = {
         'wall_time_s': end_time - start_time,
         'peak_memory_mb': peak_mem / (1024**2),
@@ -1348,10 +1487,15 @@ def run_simulation(params, progress_callback=None):
         'extents': extents,
         'times': times,
         'T_max_history': T_max_history,
-        'efficiency': efficiency_stats
+        'efficiency': efficiency_stats,
+        'cfd_enabled': enable_cfd
     }
-    final_3D = (T.copy(), alphas.copy())
-    return history, metadata, final_3D
+   
+    cfd_data = None
+    if enable_cfd and U is not None:
+        cfd_data = (U.copy(), V.copy(), W.copy(), P.copy(), C.copy())
+   
+    return history, metadata, final_3D, cfd_data
 
 # -----------------------------------------------------------------------------
 # 10. Enhanced Plotting Functions (publication‑ready) - unchanged
@@ -1409,7 +1553,7 @@ def create_enhanced_line_profiles(simulations, frames, config, style_params):
     colors = plt.cm.tab10(np.linspace(0, 1, len(simulations)))
     profile_type = config.get('profile_direction', 'z')
     for idx, (sim, frame_idx, color) in enumerate(zip(simulations, frames, colors)):
-        T_final = sim['final_3D'][0]
+        T_final = sim['final_3D'][0]  # first element is T
         ext = sim['metadata']['extents']
         center = (ext['x'][1]/2, ext['y'][1]/2, ext['z'][1]/2)
         dist, profile, _ = ThermalLineProfiler3D.extract_profile(
@@ -1438,7 +1582,7 @@ def create_publication_statistics(simulations, frames, config, style_params):
 
     all_data = []; labels = []
     for sim, frame_idx in zip(simulations, frames):
-        T_final = sim['final_3D'][0]
+        T_final = sim['final_3D'][0]  # first is T
         flat = T_final.flatten()
         flat = flat[np.isfinite(flat)]
         all_data.append(flat)
@@ -1495,7 +1639,7 @@ def create_publication_statistics(simulations, frames, config, style_params):
     if len(simulations) > 0:
         sim0 = simulations[0]
         T_final = sim0['final_3D'][0]
-        alpha_final = sim0['final_3D'][1][0]  # SEI
+        alpha_final = sim0['final_3D'][-1][0]  # alphas is last element
         flat_T = T_final.flatten()
         flat_alpha = alpha_final.flatten()
         idx = np.random.choice(len(flat_T), min(5000, len(flat_T)), replace=False)
@@ -1590,7 +1734,7 @@ def create_publication_correlation(simulations, frames, config, style_params):
     colors = plt.cm.tab10(np.linspace(0, 1, len(simulations)))
     for sim, frame_idx, color in zip(simulations, frames, colors):
         T_final = sim['final_3D'][0]
-        alpha_final = sim['final_3D'][1][0]
+        alpha_final = sim['final_3D'][-1][0]  # alphas
         flat_T = T_final.flatten()
         flat_alpha = alpha_final.flatten()
         idx = np.random.choice(len(flat_T), min(5000, len(flat_T)), replace=False)
@@ -1605,424 +1749,7 @@ def create_publication_correlation(simulations, frames, config, style_params):
     return fig
 
 # -----------------------------------------------------------------------------
-# 11. Main UI
-# -----------------------------------------------------------------------------
-advanced_styling = get_styling_controls()
-
-operation_mode = st.sidebar.radio(
-    "Operation Mode",
-    ["Run New Simulation", "Compare Saved Simulations"],
-    index=0
-)
-
-if operation_mode == "Run New Simulation":
-    st.sidebar.header("🎛️ New Simulation Setup")
-    with st.sidebar.expander("Geometry & Mesh", expanded=True):
-        col1, col2, col3 = st.columns(3)
-        with col1:
-            Lx = st.number_input("Length (m)", 0.005, 0.100, 0.030, 0.001)
-        with col2:
-            Ly = st.number_input("Width (m)", 0.005, 0.100, 0.040, 0.001)
-        with col3:
-            Lz = st.number_input("Thickness (m)", 0.003, 0.050, 0.010, 0.001)
-        col1, col2, col3 = st.columns(3)
-        with col1:
-            Nx = st.number_input("Nx", 10, 80, 30, 5)
-        with col2:
-            Ny = st.number_input("Ny", 10, 100, 40, 5)
-        with col3:
-            Nz = st.number_input("Nz", 5, 40, 20, 5)
-    with st.sidebar.expander("Material & Boundary"):
-        rho = st.number_input("Density (kg/m³)", 1000.0, 3000.0, 2330.0, 10.0)
-        Cp = st.number_input("Cp (J/kg·K)", 500.0, 2000.0, 1100.0, 50.0)
-        kx = st.number_input("k_x (W/m·K)", 5.0, 60.0, 25.0, 1.0)
-        ky = st.number_input("k_y (W/m·K)", 5.0, 60.0, 25.0, 1.0)
-        kz = st.number_input("k_z (W/m·K)", 0.5, 5.0, 1.5, 0.1)
-        T_amb = st.number_input("Ambient T (K)", 250, 350, 300, 1)
-        h_conv = st.number_input("h_conv (W/m²·K)", 0.0, 50.0, 15.0, 1.0)
-        eps = st.number_input("Emissivity", 0.05, 0.95, 0.20, 0.05)
-    with st.sidebar.expander("Heat & Trigger", expanded=True):
-        q_normal = st.number_input("Normal Heat (W/m³)", 0.0, 5e5, 5e4, 1e4, format="%.0f")
-        trigger_temp = st.number_input("Hotspot T (K)", 350, 600, 450, 5,
-                                       help="Set to 420-500 K for realistic runaway. 450 K is typical.")
-        trigger_radius = st.slider("Hotspot radius (cells)", 1, 10, 3)
-    with st.sidebar.expander("Time Stepping"):
-        t_max = st.number_input("Duration (s)", 10, 600, 200, 10)
-        dt_init = st.number_input("dt_init (s)", 0.001, 0.1, 0.01, 0.005, format="%.3f")
-        dt_min = st.number_input("dt_min (s)", 1e-7, 1e-4, 1e-6, step=1e-7, format="%.1e")
-        dt_max = st.number_input("dt_max (s)", 0.001, 0.1, 0.01, 0.005, format="%.3f")
-        sample_interval = st.number_input("Sample interval (s)", 0.1, 10.0, 0.5, 0.1)
-
-    # --- NEW: ADVANCED SOLVER CONTROLS ---
-    with st.sidebar.expander("⚙️ Advanced Numerics & Solver", expanded=False):
-        cfl_factor = st.slider("CFL Safety Factor", 0.1, 0.45, 0.4, 0.05,
-                               help="Controls max stable timestep. Lower = safer but slower. >0.5 may cause numerical instability.")
-        adapt_dt_thresh = st.slider("Adaptive dt Threshold (K)", 400, 1000, 600, 10,
-                                    help="Shrink dt when T_max exceeds this temperature to resolve thermal runaway spikes.")
-        adapt_dt_factor = st.slider("dt Shrink Factor", 0.5, 0.95, 0.8, 0.05,
-                                    help="Multiplier for dt when threshold is exceeded.")
-        ui_throttle = st.slider("UI Update Interval (steps)", 10, 1000, 200, 10,
-                                help="Update progress bar every N steps. Higher = faster execution but less frequent UI updates.")
-        safe_T_limit = st.slider("Safety Cutoff Temp (K)", 1000, 2000, 1500, 50,
-                                 help="Abort simulation if T_max exceeds this to prevent NaN/infinity errors.")
-
-    label = st.sidebar.text_input("Run Label (optional)", value=f"h={h_conv:.1f} trig={trigger_temp:.0f}K")
-
-    # --- PRE-SIMULATION DIAGNOSTICS ---
-    with st.sidebar.expander("🔍 Pre-Simulation Diagnostics", expanded=False):
-        st.write(f"**Trigger Temperature:** {trigger_temp} K = {trigger_temp-273.15:.0f} °C")
-        st.write(f"**Ambient Temperature:** {T_amb} K = {T_amb-273.15:.0f} °C")
-        st.write(f"**Temperature Difference:** {trigger_temp - T_amb:.1f} K")
-        if trigger_temp < 420:
-            st.error("⚠️ TRIGGER TEMPERATURE TOO LOW! Thermal runaway may not initiate.")
-            st.warning("Minimum recommended: 420 K (147°C) for SEI-driven runaway.")
-            st.info("Suggested value: 450-500 K for clear thermal runaway behavior.")
-        elif trigger_temp < 450:
-            st.warning("⚠️ Trigger temperature is at the lower end. Consider increasing to 450+ K for more pronounced runaway.")
-        else:
-            st.success("✅ Trigger temperature is in realistic range for thermal runaway.")
-        if trigger_temp - T_amb < 100:
-            st.warning("⚠️ Small temperature difference - thermal gradients may be modest.")
-        st.write(f"**Mesh cells:** {Nx*Ny*Nz:,}")
-
-    # --- 3D DOMAIN SKETCH (UPGRADED) ---
-    st.subheader("📐 Initial Domain Sketch (3D Interactive)")
-    sketch_params = {
-        'Lx': Lx, 'Ly': Ly, 'Lz': Lz,
-        'Nx': Nx, 'Ny': Ny, 'Nz': Nz,
-        'T_amb': T_amb, 'trigger_radius': trigger_radius
-    }
-    fig_3d = plot_3d_domain_sketch(sketch_params)
-    st.plotly_chart(fig_3d, use_container_width=True)
-    
-    # --- EFFICIENCY MONITOR ---
-    if 'last_efficiency' in st.session_state:
-        st.subheader("⚡ Compute Efficiency Monitor (Last Run)")
-        eff = st.session_state['last_efficiency']
-        col1, col2, col3, col4, col5 = st.columns(5)
-        col1.metric("Wall Time", f"{eff['wall_time_s']:.2f} s")
-        col2.metric("Peak RAM (MB)", f"{eff['peak_memory_mb']:.1f} MB")
-        col3.metric("Process RAM (MB)", f"{eff['process_memory_mb']:.1f} MB")
-        col4.metric("Grid Arrays (MB)", f"{eff['array_memory_mb']:.1f} MB")
-        col5.metric("Total Cells", f"{eff['mesh_cells']:,}")
-        if eff['cpu_avg_percent'] is not None:
-            col6, col7 = st.columns(2)
-            col6.metric("Avg CPU (%)", f"{eff['cpu_avg_percent']:.1f} %")
-            col7.metric("OS RAM Delta (MB)", f"{eff['os_memory_delta_mb']:.1f} MB")
-        with st.expander("📊 Detailed Efficiency Metrics & JSON"):
-            st.json(eff)
-
-    if st.sidebar.button("🚀 Run & Save", type="primary"):
-        params = {
-            'Lx': Lx, 'Ly': Ly, 'Lz': Lz,
-            'Nx': Nx, 'Ny': Ny, 'Nz': Nz,
-            'rho': rho, 'Cp': Cp,
-            'kx': kx, 'ky': ky, 'kz': kz,
-            'T_amb': T_amb,
-            'h_conv': h_conv,
-            'eps': eps,
-            'q_normal': q_normal,
-            'reaction_params': np.array([
-                [1.3508e5, 1.667e15, 2.57e5 * rho],
-                [1.5006e5, 2.500e13, 1.714e6 * rho],
-                [1.3960e5, 6.667e13, 3.140e5 * rho],
-                [2.0000e5, 5.700e15, 1.550e5 * rho]
-            ], dtype=np.float64),
-            'dt_init': dt_init,
-            'dt_min': dt_min,
-            'dt_max': dt_max,
-            't_max': t_max,
-            'sample_interval': sample_interval,
-            'trigger_temp': trigger_temp,
-            'trigger_radius': trigger_radius,
-            'label': label,
-            # --- NEW SOLVER PARAMS ---
-            'cfl_factor': cfl_factor,
-            'adapt_dt_thresh': adapt_dt_thresh,
-            'adapt_dt_factor': adapt_dt_factor,
-            'ui_throttle': ui_throttle,
-            'safe_T_limit': safe_T_limit
-        }
-        
-        # --- LIVE STATUS PLACEHOLDERS ---
-        status_placeholder = st.empty()
-        progress_bar = st.progress(0.0)
-        live_metrics = st.empty()
-        start_time = time.time()
-        
-        def update_progress(fraction):
-            progress_bar.progress(min(fraction, 1.0), text=f"Running... {fraction*100:.1f}%")
-            elapsed = time.time() - start_time
-            if fraction > 0:
-                eta = elapsed / fraction - elapsed
-                live_metrics.info(f"⏱️ Elapsed: {elapsed:.1f}s | ETA: {eta:.1f}s")
-        
-        with st.spinner("Running thermal simulation..."):
-            history, metadata, final_3D = run_simulation(params, progress_callback=update_progress)
-            sim_id = SimulationDB.save_simulation(params, history, metadata, final_3D)
-            st.session_state['last_efficiency'] = metadata['efficiency']
-        
-        progress_bar.empty()
-        live_metrics.success(f"✅ Done in {metadata['efficiency']['wall_time_s']:.2f}s")
-        time.sleep(0.5)
-        st.rerun()
-
-    st.header("📋 Saved Simulations")
-    sims = SimulationDB.get_simulation_list()
-    if sims:
-        df = pd.DataFrame([{'ID': s['id'], 'Name': s['name']} for s in sims])
-        st.dataframe(df, use_container_width=True)
-        with st.expander("🗑️ Delete Simulations"):
-            to_delete = st.multiselect("Select to delete", [s['name'] for s in sims])
-            if st.button("Delete Selected"):
-                for name in to_delete:
-                    for s in sims:
-                        if s['name'] == name:
-                            SimulationDB.delete_simulation(s['id'])
-                st.rerun()
-    else:
-        st.info("No simulations saved yet.")
-
-    if sims:
-        latest_id = sims[-1]['id']
-        sim_data = SimulationDB.get_all_simulations()[latest_id]
-        T_final = sim_data['final_3D'][0]
-        ext = sim_data['metadata']['extents']
-        mid_z = sim_data['metadata']['mesh_shape'][2] // 2
-        alphas_final = sim_data['final_3D'][1]
-        mesh_shape = sim_data['metadata']['mesh_shape']
-
-        st.subheader("🔬 Advanced 3D Volumetric Studio (Mesh‑Visible)")
-
-        with st.expander("⚙️ 3D Visualization Controls", expanded=True):
-            tab1, tab2, tab3, tab4 = st.tabs([
-                "🔷 Multi-Slice (Mesh Visible)",
-                "📐 Single Slice + Wireframe",
-                "🎯 Isosurface (Smooth)",
-                "📊 2D Heatmap (Mesh Visible)"
-            ])
-
-            with tab1:
-                st.markdown("**Multiple cross‑sections clearly show the computational mesh.**")
-                # Dynamically set slider range based on available Z indices
-                Nz_mesh = mesh_shape[2]
-                max_slices = max(1, Nz_mesh - 2)  # avoid boundaries
-                n_slices = st.slider("Number of Z-slices", 2, max_slices, min(5, max_slices), key='n_slices')
-                show_cross = st.checkbox("Show vertical X/Y centre slices (cross)", False, key='show_cross')
-                fig_ms = create_multi_slice_3d_visualization(
-                    T_final, ext, advanced_styling,
-                    n_slices=n_slices,
-                    show_cross_slices=show_cross
-                )
-                st.plotly_chart(fig_ms, use_container_width=True)
-
-            with tab2:
-                col1, col2 = st.columns(2)
-                with col1:
-                    slice_axis = st.selectbox("Slice Axis", ['z', 'y', 'x'], key='slice_ax')
-                with col2:
-                    slice_pos = st.slider("Slice Position", 0.1, 0.9, 0.5, key='slice_pos')
-                show_mesh = st.checkbox("Show Mesh Wireframe", value=True, key='show_mesh')
-                mesh_opacity = st.slider("Mesh Opacity", 0.1, 0.8, 0.4, key='mesh_op') if show_mesh else 0.0
-                fig_sw = create_mesh_aware_3d_thermal(
-                    T_final, ext, advanced_styling,
-                    show_mesh=show_mesh,
-                    mesh_opacity=mesh_opacity,
-                    slice_axis=slice_axis,
-                    slice_position=slice_pos
-                )
-                st.plotly_chart(fig_sw, use_container_width=True)
-
-            with tab3:
-                st.markdown("*Smooth isosurface (hides mesh – for reference only)*")
-                cmap_3d = st.selectbox("3D Colormap", cmap_list, index=cmap_list.index('inferno'), key='cmap_iso')
-                plotly_cmap = matplotlib_to_plotly(cmap_3d)
-                Nx, Ny, Nz = T_final.shape
-                X = np.linspace(ext['x'][0], ext['x'][1], Nx)
-                Y = np.linspace(ext['y'][0], ext['y'][1], Ny)
-                Z = np.linspace(ext['z'][0], ext['z'][1], Nz)
-                Xg, Yg, Zg = np.meshgrid(X, Y, Z, indexing='ij')
-                iso_levels = [350, 400, 450, 500, 550, 600]
-                fig_iso = go.Figure()
-                for lvl in iso_levels:
-                    if T_final.max() > lvl:
-                        fig_iso.add_trace(go.Isosurface(
-                            x=Xg.flatten(), y=Yg.flatten(), z=Zg.flatten(),
-                            value=T_final.flatten(),
-                            isomin=lvl-5, isomax=lvl+5,
-                            opacity=0.3, colorscale=plotly_cmap,
-                            showscale=False, name=f'T = {lvl} K'
-                        ))
-                fig_iso.update_layout(
-                    scene=dict(
-                        xaxis=dict(title='x (m)'),
-                        yaxis=dict(title='y (m)'),
-                        zaxis=dict(title='z (m)'),
-                        aspectmode='data'
-                    ),
-                    title=dict(text='🔥 Isosurfaces (Smooth)', x=0.5),
-                    height=700
-                )
-                st.plotly_chart(fig_iso, use_container_width=True)
-
-            with tab4:
-                st.markdown("**2D mid‑Z heatmap with cell edges – shows mesh structure clearly.**")
-                T_mid = T_final[:, :, mid_z]
-                extent_xy = [ext['x'][0], ext['x'][1], ext['y'][0], ext['y'][1]]
-                show_mesh_2d = st.checkbox("Show Mesh Edges", value=True, key='show_mesh_2d')
-                mesh_color = st.color_picker("Edge Color", "#000000", key='mesh_color')
-                mesh_alpha = st.slider("Edge Alpha", 0.0, 0.8, 0.3, key='mesh_alpha')
-                mesh_lw = st.slider("Edge Linewidth", 0.1, 2.0, 0.5, key='mesh_lw')
-                fig_2d = create_2d_heatmap_with_mesh(
-                    T_mid, extent_xy, advanced_styling,
-                    show_mesh=show_mesh_2d,
-                    mesh_color=mesh_color,
-                    mesh_alpha=mesh_alpha,
-                    mesh_linewidth=mesh_lw
-                )
-                st.pyplot(fig_2d)
-
-        # --- Time Evolution Slider (unchanged) ---
-        if len(sim_data['history']) > 1:
-            st.subheader("Time Evolution Slider")
-            frames = []
-            for entry in sim_data['history']:
-                T_mid = entry['T_mid']
-                frames.append(go.Frame(data=[go.Heatmap(z=T_mid, colorscale='Viridis')],
-                                       name=f"t={entry['time']:.1f}s"))
-            fig_slider = go.Figure(
-                data=[go.Heatmap(z=sim_data['history'][0]['T_mid'], colorscale='Viridis')],
-                frames=frames
-            )
-            fig_slider.update_layout(
-                updatemenus=[{
-                    'type': 'buttons',
-                    'buttons': [
-                        {'label': 'Play', 'method': 'animate', 'args': [None, {'frame': {'duration': 200, 'redraw': True}, 'fromcurrent': True}]},
-                        {'label': 'Pause', 'method': 'animate', 'args': [[None], {'frame': {'duration': 0, 'redraw': False}, 'mode': 'immediate'}]}
-                    ]
-                }],
-                sliders=[{
-                    'currentvalue': {'prefix': 'Time: ', 'suffix': ' s'},
-                    'steps': [
-                        {'args': [[f.name], {'frame': {'duration': 0, 'redraw': True}, 'mode': 'immediate'}],
-                         'label': f"{sim_data['history'][i]['time']:.1f}", 'method': 'animate'}
-                        for i, f in enumerate(frames)
-                    ]
-                }],
-                width=800, height=600
-            )
-            st.plotly_chart(fig_slider, use_container_width=True)
-
-else:  # Compare Saved Simulations
-    st.header("🔬 Multi‑Simulation Comparison")
-    sims = SimulationDB.get_simulation_list()
-    if not sims:
-        st.warning("No simulations available. Run some first!")
-    else:
-        selected_names = st.sidebar.multiselect(
-            "Select simulations to compare",
-            [s['name'] for s in sims],
-            default=[s['name'] for s in sims][:min(3, len(sims))]
-        )
-        selected_ids = [s['id'] for s in sims if s['name'] in selected_names]
-        if selected_ids:
-            all_sims = SimulationDB.get_all_simulations()
-            selected_sims = [all_sims[sid] for sid in selected_ids]
-
-            comparison_type = st.sidebar.selectbox(
-                "Comparison Type",
-                ["Side-by-Side Heatmaps", "Overlay Line Profiles",
-                 "Statistical Summary", "Evolution Timeline",
-                 "T vs α Correlation", "Parameter Correlation"],
-                index=0
-            )
-            frame_selection = st.sidebar.radio(
-                "Frame Selection",
-                ["Final Frame", "Same Evolution Time", "Specific Index"],
-                index=0
-            )
-            if frame_selection == "Specific Index":
-                frame_idx = st.sidebar.slider("Frame Index", 0, 100, 0)
-            else:
-                frame_idx = None
-
-            profile_direction = 'z'
-            if comparison_type == "Overlay Line Profiles":
-                profile_direction = st.sidebar.selectbox(
-                    "Profile Direction",
-                    ['x', 'y', 'z', 'diag_xy', 'diag_xz', 'diag_yz'],
-                    index=2
-                )
-            x_param = 'h_conv'
-            if comparison_type == "Parameter Correlation":
-                x_param = st.sidebar.selectbox(
-                    "X‑axis parameter",
-                    ['h_conv', 'trigger_temp', 'Lx', 'Ly', 'Lz', 'rho', 'Cp', 'kx', 'ky', 'kz'],
-                    index=0
-                )
-
-            if st.sidebar.button("🔬 Run Comparison", type="primary"):
-                frames = []
-                for sim in selected_sims:
-                    hist_len = len(sim['history'])
-                    if frame_selection == "Final Frame":
-                        frames.append(hist_len - 1)
-                    elif frame_selection == "Same Evolution Time":
-                        frames.append(int(hist_len * 0.8))
-                    else:
-                        frames.append(min(frame_idx, hist_len - 1))
-
-                config = {
-                    'type': comparison_type,
-                    'profile_direction': profile_direction,
-                    'x_param': x_param,
-                }
-                if comparison_type == "Side-by-Side Heatmaps":
-                    fig = create_publication_heatmaps(selected_sims, frames, config, advanced_styling)
-                elif comparison_type == "Overlay Line Profiles":
-                    fig = create_enhanced_line_profiles(selected_sims, frames, config, advanced_styling)
-                elif comparison_type == "Statistical Summary":
-                    fig = create_publication_statistics(selected_sims, frames, config, advanced_styling)
-                elif comparison_type == "Evolution Timeline":
-                    fig = create_evolution_timeline_plot(selected_sims, config, advanced_styling)
-                elif comparison_type == "T vs α Correlation":
-                    fig = create_publication_correlation(selected_sims, frames, config, advanced_styling)
-                elif comparison_type == "Parameter Correlation":
-                    fig = create_cross_correlation_plot(selected_sims, config, advanced_styling)
-                else:
-                    fig = None
-
-                if fig is not None:
-                    st.pyplot(fig)
-
-                with st.expander("🔄 Real‑time Post‑Processing", expanded=False):
-                    st.subheader("Live Figure Customization")
-                    col1, col2 = st.columns(2)
-                    with col1:
-                        update_fonts = st.checkbox("Update Font Sizes", True)
-                        update_lines = st.checkbox("Update Line Styles", True)
-                    with col2:
-                        update_colors = st.checkbox("Update Colors", True)
-                        update_grid = st.checkbox("Update Grid", True)
-                    if st.button("🔄 Refresh with New Styling", type="secondary"):
-                        st.rerun()
-
-                with st.expander("📊 Simulation Metadata"):
-                    df_meta = pd.DataFrame([{
-                        'ID': s['id'],
-                        'Label': s['params'].get('label', ''),
-                        'Final Tmax (K)': s['metadata']['final_T_max'],
-                        'Wall time (s)': s['metadata']['wall_time'],
-                        'Steps': s['metadata']['total_steps']
-                    } for s in selected_sims])
-                    st.dataframe(df_meta)
-
-        else:
-            st.info("Select simulations from the sidebar.")
-
-# -----------------------------------------------------------------------------
-# 12. Export (unchanged)
+# 11. Export Helpers (unchanged)
 # -----------------------------------------------------------------------------
 import pickle
 
@@ -2065,134 +1792,606 @@ def generate_vts_string(T, alphas, extents, time_val):
                   '</VTKFile>'])
     return '\n'.join(lines)
 
-st.sidebar.header("💾 Export Options")
-export_format = st.sidebar.selectbox(
-    "Export Format",
-    ["Complete Package (ZIP)", "VTK for ParaView (.vts/.pvd)", "Raw Numpy Arrays (.npy/.pkl)", "Raw Data CSV"]
-)
-include_styling = st.sidebar.checkbox("Include Styling Parameters", True)
+# -----------------------------------------------------------------------------
+# 12. MAIN APP UI (New Tabbed Layout)
+# -----------------------------------------------------------------------------
+def main():
+    # Get styling controls (populates sidebar)
+    advanced_styling = get_styling_controls()
+    
+    # Create main tabs
+    tab_setup, tab_results, tab_viz, tab_compare, tab_export = st.tabs([
+        "⚙️ Setup & Run",
+        "📊 Results",
+        "🔬 3D Visualization",
+        "📈 Comparison",
+        "💾 Export"
+    ])
+    
+    # =====================================================================
+    # TAB 1: Setup & Run
+    # =====================================================================
+    with tab_setup:
+        st.header("🔬 Simulation Setup")
+        st.markdown("Define geometry, material, boundary, and solver parameters.")
+        
+        col1, col2 = st.columns(2)
+        with col1:
+            st.subheader("Geometry & Mesh")
+            Lx = st.number_input("Length X (m)", 0.005, 0.100, 0.030, 0.001, key='Lx')
+            Ly = st.number_input("Width Y (m)", 0.005, 0.100, 0.040, 0.001, key='Ly')
+            Lz = st.number_input("Thickness Z (m)", 0.003, 0.050, 0.010, 0.001, key='Lz')
+            Nx = st.slider("Mesh Nx", 10, 80, 30, key='Nx')
+            Ny = st.slider("Mesh Ny", 10, 80, 40, key='Ny')
+            Nz = st.slider("Mesh Nz", 5, 40, 20, key='Nz')
+        
+        with col2:
+            st.subheader("Material Properties")
+            rho = st.number_input("Density (kg/m³)", 1000.0, 3000.0, 2330.0, 10.0, key='rho')
+            Cp = st.number_input("Cp (J/kg·K)", 500.0, 2000.0, 1100.0, 50.0, key='Cp')
+            kx = st.number_input("k_x (W/m·K)", 5.0, 60.0, 25.0, 1.0, key='kx')
+            ky = st.number_input("k_y (W/m·K)", 5.0, 60.0, 25.0, 1.0, key='ky')
+            kz = st.number_input("k_z (W/m·K)", 0.5, 5.0, 1.5, 0.1, key='kz')
+        
+        col3, col4 = st.columns(2)
+        with col3:
+            st.subheader("Boundary Conditions")
+            T_amb = st.number_input("Ambient T (K)", 250, 350, 300, 1, key='T_amb')
+            h_conv = st.number_input("h_conv (W/m²·K)", 0.0, 50.0, 15.0, 1.0, key='h_conv')
+            eps = st.number_input("Emissivity", 0.05, 0.95, 0.20, 0.05, key='eps')
+        
+        with col4:
+            st.subheader("Heat & Trigger")
+            q_normal = st.number_input("Normal Heat (W/m³)", 0.0, 5e5, 5e4, 1e4, format="%.0f", key='q_normal')
+            trigger_temp = st.number_input("Hotspot T (K)", 350, 600, 450, 5, key='trigger_temp',
+                                           help="Set to 420-500 K for realistic runaway. 450 K is typical.")
+            trigger_radius = st.slider("Hotspot radius (cells)", 1, 10, 3, key='trigger_radius')
+        
+        col5, col6 = st.columns(2)
+        with col5:
+            st.subheader("Time Stepping")
+            t_max = st.number_input("Duration (s)", 10, 600, 200, 10, key='t_max')
+            dt_init = st.number_input("dt_init (s)", 0.001, 0.1, 0.01, 0.005, format="%.3f", key='dt_init')
+            dt_min = st.number_input("dt_min (s)", 1e-7, 1e-4, 1e-6, step=1e-7, format="%.1e", key='dt_min')
+            dt_max = st.number_input("dt_max (s)", 0.001, 0.1, 0.01, 0.005, format="%.3f", key='dt_max')
+            sample_interval = st.number_input("Sample interval (s)", 0.1, 10.0, 0.5, 0.1, key='sample_interval')
+        
+        with col6:
+            st.subheader("⚙️ Advanced Numerics & CFD")
+            cfl_factor = st.slider("CFL Safety Factor", 0.1, 0.45, 0.4, 0.05, key='cfl_factor',
+                                   help="Controls max stable timestep. Lower = safer but slower.")
+            adapt_dt_thresh = st.slider("Adaptive dt Threshold (K)", 400, 1000, 600, 10, key='adapt_dt_thresh')
+            adapt_dt_factor = st.slider("dt Shrink Factor", 0.5, 0.95, 0.8, 0.05, key='adapt_dt_factor')
+            ui_throttle = st.slider("UI Update Interval (steps)", 10, 1000, 200, 10, key='ui_throttle')
+            safe_T_limit = st.slider("Safety Cutoff Temp (K)", 1000, 2000, 1500, 50, key='safe_T_limit')
+            enable_cfd = st.checkbox("Enable CFD-Lite (smoke)", value=False, key='enable_cfd',
+                                     help="Experimental: couples a simple buoyancy-driven flow with smoke advection.")
+            if enable_cfd:
+                st.info("CFD-Lite is a stub; actual implementation required for production use.")
+        
+        label = st.text_input("Run Label (optional)", value=f"h={h_conv:.1f} trig={trigger_temp:.0f}K", key='label')
+        
+        # Pre-simulation diagnostics
+        with st.expander("🔍 Pre-Simulation Diagnostics", expanded=False):
+            st.write(f"**Trigger Temperature:** {trigger_temp} K = {trigger_temp-273.15:.0f} °C")
+            st.write(f"**Ambient Temperature:** {T_amb} K = {T_amb-273.15:.0f} °C")
+            st.write(f"**Temperature Difference:** {trigger_temp - T_amb:.1f} K")
+            if trigger_temp < 420:
+                st.error("⚠️ TRIGGER TEMPERATURE TOO LOW! Thermal runaway may not initiate.")
+                st.warning("Minimum recommended: 420 K (147°C) for SEI-driven runaway.")
+                st.info("Suggested value: 450-500 K for clear thermal runaway behavior.")
+            elif trigger_temp < 450:
+                st.warning("⚠️ Trigger temperature is at the lower end. Consider increasing to 450+ K for more pronounced runaway.")
+            else:
+                st.success("✅ Trigger temperature is in realistic range for thermal runaway.")
+            if trigger_temp - T_amb < 100:
+                st.warning("⚠️ Small temperature difference - thermal gradients may be modest.")
+            st.write(f"**Mesh cells:** {Nx*Ny*Nz:,}")
+        
+        # 3D Domain Sketch
+        st.subheader("📐 Initial Domain Sketch (3D Interactive)")
+        sketch_params = {
+            'Lx': Lx, 'Ly': Ly, 'Lz': Lz,
+            'Nx': Nx, 'Ny': Ny, 'Nz': Nz,
+            'T_amb': T_amb, 'trigger_radius': trigger_radius
+        }
+        fig_3d = plot_3d_domain_sketch(sketch_params)
+        st.plotly_chart(fig_3d, use_container_width=True)
+        
+        # Efficiency monitor (last run)
+        if 'last_efficiency' in st.session_state:
+            st.subheader("⚡ Compute Efficiency Monitor (Last Run)")
+            eff = st.session_state['last_efficiency']
+            cola, colb, colc, cold, cole = st.columns(5)
+            cola.metric("Wall Time", f"{eff['wall_time_s']:.2f} s")
+            colb.metric("Peak RAM (MB)", f"{eff['peak_memory_mb']:.1f} MB")
+            colc.metric("Process RAM (MB)", f"{eff['process_memory_mb']:.1f} MB")
+            cold.metric("Grid Arrays (MB)", f"{eff['array_memory_mb']:.1f} MB")
+            cole.metric("Total Cells", f"{eff['mesh_cells']:,}")
+            if eff['cpu_avg_percent'] is not None:
+                colf, colg = st.columns(2)
+                colf.metric("Avg CPU (%)", f"{eff['cpu_avg_percent']:.1f} %")
+                colg.metric("OS RAM Delta (MB)", f"{eff['os_memory_delta_mb']:.1f} MB")
+            with st.expander("📊 Detailed Efficiency Metrics & JSON"):
+                st.json(eff)
+        
+        # Run button
+        if st.button("🚀 Run & Save", type="primary"):
+            params = {
+                'Lx': Lx, 'Ly': Ly, 'Lz': Lz,
+                'Nx': Nx, 'Ny': Ny, 'Nz': Nz,
+                'rho': rho, 'Cp': Cp,
+                'kx': kx, 'ky': ky, 'kz': kz,
+                'T_amb': T_amb,
+                'h_conv': h_conv,
+                'eps': eps,
+                'q_normal': q_normal,
+                'reaction_params': np.array([
+                    [1.3508e5, 1.667e15, 2.57e5 * rho],
+                    [1.5006e5, 2.500e13, 1.714e6 * rho],
+                    [1.3960e5, 6.667e13, 3.140e5 * rho],
+                    [2.0000e5, 5.700e15, 1.550e5 * rho]
+                ], dtype=np.float64),
+                'dt_init': dt_init,
+                'dt_min': dt_min,
+                'dt_max': dt_max,
+                't_max': t_max,
+                'sample_interval': sample_interval,
+                'trigger_temp': trigger_temp,
+                'trigger_radius': trigger_radius,
+                'label': label,
+                'cfl_factor': cfl_factor,
+                'adapt_dt_thresh': adapt_dt_thresh,
+                'adapt_dt_factor': adapt_dt_factor,
+                'ui_throttle': ui_throttle,
+                'safe_T_limit': safe_T_limit,
+                'enable_cfd': enable_cfd,
+                # Additional CFD params (if needed)
+                'rho_fluid': 1.2, 'nu': 1.5e-5, 'beta': 0.003, 'D_smoke': 1e-5, 'T_vent': 450.0
+            }
+            
+            status_placeholder = st.empty()
+            progress_bar = st.progress(0.0)
+            live_metrics = st.empty()
+            start_time = time.time()
+            
+            def update_progress(fraction):
+                progress_bar.progress(min(fraction, 1.0), text=f"Running... {fraction*100:.1f}%")
+                elapsed = time.time() - start_time
+                if fraction > 0:
+                    eta = elapsed / fraction - elapsed
+                    live_metrics.info(f"⏱️ Elapsed: {elapsed:.1f}s | ETA: {eta:.1f}s")
+            
+            with st.spinner("Running thermal simulation..."):
+                history, metadata, final_3D, cfd_data = run_simulation(params, progress_callback=update_progress)
+                sim_id = SimulationDB.save_simulation(params, history, metadata, final_3D, cfd_data)
+                st.session_state['last_efficiency'] = metadata['efficiency']
+                st.session_state['last_sim_id'] = sim_id
+            
+            progress_bar.empty()
+            live_metrics.success(f"✅ Done in {metadata['efficiency']['wall_time_s']:.2f}s")
+            st.rerun()
+    
+    # =====================================================================
+    # TAB 2: Results (latest simulation)
+    # =====================================================================
+    with tab_results:
+        st.header("📊 Simulation Results")
+        sims = SimulationDB.get_simulation_list()
+        if not sims:
+            st.info("No simulations available. Run one in the Setup tab.")
+        else:
+            # Show latest by default
+            latest = sims[-1]['id']
+            sim_data = SimulationDB.get_all_simulations()[latest]
+            st.subheader(f"Latest: {sim_data['params'].get('label', '')}")
+            col1, col2, col3 = st.columns(3)
+            col1.metric("Final Tmax", f"{sim_data['metadata']['final_T_max']:.1f} K")
+            col2.metric("Wall Time", f"{sim_data['metadata']['wall_time']:.2f} s")
+            col3.metric("Steps", f"{sim_data['metadata']['total_steps']}")
+            
+            # Evolution plot
+            fig_timeline = create_evolution_timeline_plot([sim_data], {}, advanced_styling)
+            st.pyplot(fig_timeline)
+            
+            # Mid-plane heatmap
+            T_final = sim_data['final_3D'][0]
+            mid_z = sim_data['metadata']['mesh_shape'][2] // 2
+            T_mid = T_final[:, :, mid_z]
+            ext = sim_data['metadata']['extents']
+            extent_xy = [ext['x'][0], ext['x'][1], ext['y'][0], ext['y'][1]]
+            fig_heat = create_2d_heatmap_with_mesh(T_mid, extent_xy, advanced_styling,
+                                                   show_mesh=True, mesh_color='black',
+                                                   mesh_alpha=0.2, mesh_linewidth=0.5)
+            st.pyplot(fig_heat)
+    
+    # =====================================================================
+    # TAB 3: 3D Visualization
+    # =====================================================================
+    with tab_viz:
+        st.header("🔬 Advanced 3D Volumetric Studio")
+        sims = SimulationDB.get_simulation_list()
+        if not sims:
+            st.info("No simulations available.")
+        else:
+            # Select a simulation to visualize
+            sim_names = [s['name'] for s in sims]
+            selected_name = st.selectbox("Select Simulation", sim_names, key='viz_select')
+            sim_id = [s['id'] for s in sims if s['name'] == selected_name][0]
+            sim_data = SimulationDB.get_all_simulations()[sim_id]
+            T_final = sim_data['final_3D'][0]
+            ext = sim_data['metadata']['extents']
+            mesh_shape = sim_data['metadata']['mesh_shape']
+            Nz_mesh = mesh_shape[2]
+            
+            with st.expander("⚙️ 3D Visualization Controls", expanded=True):
+                tab1, tab2, tab3, tab4 = st.tabs([
+                    "🔷 Multi-Slice (Mesh Visible)",
+                    "📐 Single Slice + Wireframe",
+                    "🎯 Isosurface (Smooth)",
+                    "📊 2D Heatmap (Mesh Visible)"
+                ])
+                
+                with tab1:
+                    st.markdown("**Multiple cross‑sections clearly show the computational mesh.**")
+                    max_slices = max(1, Nz_mesh - 2)
+                    n_slices = st.slider("Number of Z-slices", 2, max_slices, min(5, max_slices), key='n_slices_viz')
+                    show_cross = st.checkbox("Show vertical X/Y centre slices (cross)", False, key='show_cross_viz')
+                    fig_ms = create_multi_slice_3d_visualization(
+                        T_final, ext, advanced_styling,
+                        n_slices=n_slices, show_cross_slices=show_cross
+                    )
+                    st.plotly_chart(fig_ms, use_container_width=True)
+                
+                with tab2:
+                    col1, col2 = st.columns(2)
+                    with col1:
+                        slice_axis = st.selectbox("Slice Axis", ['z', 'y', 'x'], key='slice_ax_viz')
+                    with col2:
+                        slice_pos = st.slider("Slice Position", 0.1, 0.9, 0.5, key='slice_pos_viz')
+                    show_mesh = st.checkbox("Show Mesh Wireframe", value=True, key='show_mesh_viz')
+                    mesh_opacity = st.slider("Mesh Opacity", 0.1, 0.8, 0.4, key='mesh_op_viz') if show_mesh else 0.0
+                    fig_sw = create_mesh_aware_3d_thermal(
+                        T_final, ext, advanced_styling,
+                        show_mesh=show_mesh, mesh_opacity=mesh_opacity,
+                        slice_axis=slice_axis, slice_position=slice_pos
+                    )
+                    st.plotly_chart(fig_sw, use_container_width=True)
+                
+                with tab3:
+                    st.markdown("*Smooth isosurface (hides mesh – for reference only)*")
+                    cmap_3d = st.selectbox("3D Colormap", cmap_list, index=cmap_list.index('inferno'), key='cmap_iso')
+                    plotly_cmap = matplotlib_to_plotly(cmap_3d)
+                    Nx, Ny, Nz = T_final.shape
+                    X = np.linspace(ext['x'][0], ext['x'][1], Nx)
+                    Y = np.linspace(ext['y'][0], ext['y'][1], Ny)
+                    Z = np.linspace(ext['z'][0], ext['z'][1], Nz)
+                    Xg, Yg, Zg = np.meshgrid(X, Y, Z, indexing='ij')
+                    iso_levels = [350, 400, 450, 500, 550, 600]
+                    fig_iso = go.Figure()
+                    for lvl in iso_levels:
+                        if T_final.max() > lvl:
+                            fig_iso.add_trace(go.Isosurface(
+                                x=Xg.flatten(), y=Yg.flatten(), z=Zg.flatten(),
+                                value=T_final.flatten(),
+                                isomin=lvl-5, isomax=lvl+5,
+                                opacity=0.3, colorscale=plotly_cmap,
+                                showscale=False, name=f'T = {lvl} K'
+                            ))
+                    fig_iso.update_layout(
+                        scene=dict(
+                            xaxis=dict(title='x (m)'),
+                            yaxis=dict(title='y (m)'),
+                            zaxis=dict(title='z (m)'),
+                            aspectmode='data'
+                        ),
+                        title=dict(text='🔥 Isosurfaces (Smooth)', x=0.5),
+                        height=700
+                    )
+                    st.plotly_chart(fig_iso, use_container_width=True)
+                
+                with tab4:
+                    st.markdown("**2D mid‑Z heatmap with cell edges – shows mesh structure clearly.**")
+                    T_mid = T_final[:, :, Nz//2]
+                    extent_xy = [ext['x'][0], ext['x'][1], ext['y'][0], ext['y'][1]]
+                    show_mesh_2d = st.checkbox("Show Mesh Edges", value=True, key='show_mesh_2d_viz')
+                    mesh_color = st.color_picker("Edge Color", "#000000", key='mesh_color_viz')
+                    mesh_alpha = st.slider("Edge Alpha", 0.0, 0.8, 0.3, key='mesh_alpha_viz')
+                    mesh_lw = st.slider("Edge Linewidth", 0.1, 2.0, 0.5, key='mesh_lw_viz')
+                    fig_2d = create_2d_heatmap_with_mesh(
+                        T_mid, extent_xy, advanced_styling,
+                        show_mesh=show_mesh_2d, mesh_color=mesh_color,
+                        mesh_alpha=mesh_alpha, mesh_linewidth=mesh_lw
+                    )
+                    st.pyplot(fig_2d)
+            
+            # Time evolution slider
+            if len(sim_data['history']) > 1:
+                st.subheader("Time Evolution Slider")
+                frames = []
+                for entry in sim_data['history']:
+                    T_mid = entry['T_mid']
+                    frames.append(go.Frame(data=[go.Heatmap(z=T_mid, colorscale='Viridis')],
+                                           name=f"t={entry['time']:.1f}s"))
+                fig_slider = go.Figure(
+                    data=[go.Heatmap(z=sim_data['history'][0]['T_mid'], colorscale='Viridis')],
+                    frames=frames
+                )
+                fig_slider.update_layout(
+                    updatemenus=[{
+                        'type': 'buttons',
+                        'buttons': [
+                            {'label': 'Play', 'method': 'animate', 'args': [None, {'frame': {'duration': 200, 'redraw': True}, 'fromcurrent': True}]},
+                            {'label': 'Pause', 'method': 'animate', 'args': [[None], {'frame': {'duration': 0, 'redraw': False}, 'mode': 'immediate'}]}
+                        ]
+                    }],
+                    sliders=[{
+                        'currentvalue': {'prefix': 'Time: ', 'suffix': ' s'},
+                        'steps': [
+                            {'args': [[f.name], {'frame': {'duration': 0, 'redraw': True}, 'mode': 'immediate'}],
+                             'label': f"{sim_data['history'][i]['time']:.1f}", 'method': 'animate'}
+                            for i, f in enumerate(frames)
+                        ]
+                    }],
+                    width=800, height=600
+                )
+                st.plotly_chart(fig_slider, use_container_width=True)
+    
+    # =====================================================================
+    # TAB 4: Comparison
+    # =====================================================================
+    with tab_compare:
+        st.header("📈 Multi‑Simulation Comparison")
+        sims = SimulationDB.get_simulation_list()
+        if not sims:
+            st.warning("No simulations available. Run some first!")
+        else:
+            selected_names = st.multiselect(
+                "Select simulations to compare",
+                [s['name'] for s in sims],
+                default=[s['name'] for s in sims][:min(3, len(sims))]
+            )
+            selected_ids = [s['id'] for s in sims if s['name'] in selected_names]
+            if selected_ids:
+                all_sims = SimulationDB.get_all_simulations()
+                selected_sims = [all_sims[sid] for sid in selected_ids]
 
-if st.sidebar.button("📦 Generate Export", type="primary"):
-    all_sims = SimulationDB.get_all_simulations()
-    if not all_sims:
-        st.sidebar.warning("No simulations to export.")
+                comparison_type = st.selectbox(
+                    "Comparison Type",
+                    ["Side-by-Side Heatmaps", "Overlay Line Profiles",
+                     "Statistical Summary", "Evolution Timeline",
+                     "T vs α Correlation", "Parameter Correlation"],
+                    index=0
+                )
+                frame_selection = st.radio(
+                    "Frame Selection",
+                    ["Final Frame", "Same Evolution Time", "Specific Index"],
+                    index=0
+                )
+                if frame_selection == "Specific Index":
+                    frame_idx = st.slider("Frame Index", 0, 100, 0)
+                else:
+                    frame_idx = None
+
+                profile_direction = 'z'
+                if comparison_type == "Overlay Line Profiles":
+                    profile_direction = st.selectbox(
+                        "Profile Direction",
+                        ['x', 'y', 'z', 'diag_xy', 'diag_xz', 'diag_yz'],
+                        index=2
+                    )
+                x_param = 'h_conv'
+                if comparison_type == "Parameter Correlation":
+                    x_param = st.selectbox(
+                        "X‑axis parameter",
+                        ['h_conv', 'trigger_temp', 'Lx', 'Ly', 'Lz', 'rho', 'Cp', 'kx', 'ky', 'kz'],
+                        index=0
+                    )
+
+                if st.button("🔬 Run Comparison", type="primary"):
+                    frames = []
+                    for sim in selected_sims:
+                        hist_len = len(sim['history'])
+                        if frame_selection == "Final Frame":
+                            frames.append(hist_len - 1)
+                        elif frame_selection == "Same Evolution Time":
+                            frames.append(int(hist_len * 0.8))
+                        else:
+                            frames.append(min(frame_idx, hist_len - 1))
+
+                    config = {
+                        'type': comparison_type,
+                        'profile_direction': profile_direction,
+                        'x_param': x_param,
+                    }
+                    if comparison_type == "Side-by-Side Heatmaps":
+                        fig = create_publication_heatmaps(selected_sims, frames, config, advanced_styling)
+                    elif comparison_type == "Overlay Line Profiles":
+                        fig = create_enhanced_line_profiles(selected_sims, frames, config, advanced_styling)
+                    elif comparison_type == "Statistical Summary":
+                        fig = create_publication_statistics(selected_sims, frames, config, advanced_styling)
+                    elif comparison_type == "Evolution Timeline":
+                        fig = create_evolution_timeline_plot(selected_sims, config, advanced_styling)
+                    elif comparison_type == "T vs α Correlation":
+                        fig = create_publication_correlation(selected_sims, frames, config, advanced_styling)
+                    elif comparison_type == "Parameter Correlation":
+                        fig = create_cross_correlation_plot(selected_sims, config, advanced_styling)
+                    else:
+                        fig = None
+
+                    if fig is not None:
+                        st.pyplot(fig)
+
+                    with st.expander("📊 Simulation Metadata"):
+                        df_meta = pd.DataFrame([{
+                            'ID': s['id'],
+                            'Label': s['params'].get('label', ''),
+                            'Final Tmax (K)': s['metadata']['final_T_max'],
+                            'Wall time (s)': s['metadata']['wall_time'],
+                            'Steps': s['metadata']['total_steps']
+                        } for s in selected_sims])
+                        st.dataframe(df_meta)
+            else:
+                st.info("Select simulations from the list.")
+    
+    # =====================================================================
+    # TAB 5: Export
+    # =====================================================================
+    with tab_export:
+        st.header("💾 Export Options")
+        st.markdown("Export all saved simulations in various formats.")
+        export_format = st.selectbox(
+            "Export Format",
+            ["Complete Package (ZIP)", "VTK for ParaView (.vts/.pvd)", "Raw Numpy Arrays (.npy/.pkl)", "Raw Data CSV"],
+            key='export_format'
+        )
+        include_styling = st.checkbox("Include Styling Parameters", True, key='include_styling')
+        
+        if st.button("📦 Generate Export", type="primary"):
+            all_sims = SimulationDB.get_all_simulations()
+            if not all_sims:
+                st.warning("No simulations to export.")
+            else:
+                if export_format == "VTK for ParaView (.vts/.pvd)":
+                    buffer = BytesIO()
+                    with zipfile.ZipFile(buffer, "w", zipfile.ZIP_DEFLATED) as zf:
+                        pvd_lines = ['<?xml version="1.0"?>',
+                                     '<VTKFile type="Collection" version="0.1">',
+                                     '  <Collection>']
+                        for sim_id, sim_data in all_sims.items():
+                            folder = f"sim_{sim_id}"
+                            T_final = sim_data['final_3D'][0]
+                            alpha_final = sim_data['final_3D'][-1]  # alphas
+                            ext = sim_data['metadata']['extents']
+                            t = sim_data['metadata']['final_time']
+                            
+                            vts_str = generate_vts_string(T_final, alpha_final, ext, t)
+                            vts_filename = f"{folder}/final_state.vts"
+                            zf.writestr(vts_filename, vts_str)
+                            pvd_lines.append(f'    <DataSet timestep="{t}" group="" part="0" file="{vts_filename}"/>')
+                            
+                        pvd_lines.extend(['  </Collection>', '</VTKFile>'])
+                        zf.writestr("paraview_scene.pvd", '\n'.join(pvd_lines))
+                    buffer.seek(0)
+                    ts = datetime.now().strftime('%Y%m%d_%H%M%S')
+                    st.download_button("📥 Download VTK ZIP", buffer.getvalue(), f"vtk_export_{ts}.zip", "application/zip")
+                    st.success("VTK Export ready! Unzip and open the .pvd file in ParaView.")
+
+                elif export_format == "Raw Numpy Arrays (.npy/.pkl)":
+                    buffer = BytesIO()
+                    with zipfile.ZipFile(buffer, "w", zipfile.ZIP_DEFLATED) as zf:
+                        for sim_id, sim_data in all_sims.items():
+                            folder = f"sim_{sim_id}"
+                            T_final = sim_data['final_3D'][0]
+                            alpha_final = sim_data['final_3D'][-1]
+                            
+                            np_bytes = BytesIO()
+                            np.save(np_bytes, T_final)
+                            zf.writestr(f"{folder}/T_final.npy", np_bytes.getvalue())
+                            
+                            np_bytes = BytesIO()
+                            np.save(np_bytes, alpha_final)
+                            zf.writestr(f"{folder}/alpha_final.npy", np_bytes.getvalue())
+                            
+                            pkl_bytes = BytesIO()
+                            pickle.dump(sim_data, pkl_bytes)
+                            zf.writestr(f"{folder}/full_data.pkl", pkl_bytes.getvalue())
+                    buffer.seek(0)
+                    ts = datetime.now().strftime('%Y%m%d_%H%M%S')
+                    st.download_button("📥 Download Numpy ZIP", buffer.getvalue(), f"numpy_export_{ts}.zip", "application/zip")
+                    st.success("Numpy/PKL Export ready!")
+
+                elif export_format == "Complete Package (ZIP)":
+                    buffer = BytesIO()
+                    with zipfile.ZipFile(buffer, "w", zipfile.ZIP_DEFLATED) as zf:
+                        for sim_id, sim_data in all_sims.items():
+                            folder = f"sim_{sim_id}"
+                            zf.writestr(f"{folder}/params.json", json.dumps(sim_data['params'], indent=2, default=str))
+                            zf.writestr(f"{folder}/metadata.json", json.dumps(sim_data['metadata'], indent=2))
+                            if include_styling:
+                                zf.writestr(f"{folder}/styling.json", json.dumps(advanced_styling, indent=2))
+                            for i, entry in enumerate(sim_data['history']):
+                                df = pd.DataFrame({
+                                    'T_mid': entry['T_mid'].flatten(),
+                                    'alpha_mid': entry['alpha_mid'].flatten()
+                                })
+                                zf.writestr(f"{folder}/frame_{i:04d}.csv", df.to_csv(index=False))
+                    buffer.seek(0)
+                    ts = datetime.now().strftime('%Y%m%d_%H%M%S')
+                    st.download_button("📥 Download ZIP", buffer.getvalue(), f"thermal_simulations_{ts}.zip", "application/zip")
+                    st.success("Export ready!")
+
+                elif export_format == "Raw Data CSV":
+                    buffer = BytesIO()
+                    with zipfile.ZipFile(buffer, "w", zipfile.ZIP_DEFLATED) as zf:
+                        for sim_id, sim_data in all_sims.items():
+                            folder = f"sim_{sim_id}"
+                            for i, entry in enumerate(sim_data['history']):
+                                df = pd.DataFrame({
+                                    'T_mid': entry['T_mid'].flatten(),
+                                    'alpha_mid': entry['alpha_mid'].flatten()
+                                })
+                                zf.writestr(f"{folder}/frame_{i:04d}.csv", df.to_csv(index=False))
+                    buffer.seek(0)
+                    ts = datetime.now().strftime('%Y%m%d_%H%M%S')
+                    st.download_button("📥 Download CSV ZIP", buffer.getvalue(), f"csv_export_{ts}.zip", "application/zip")
+                    st.success("CSV Export ready!")
+
+    # =====================================================================
+    # Sidebar: Saved Simulations list (always visible)
+    # =====================================================================
+    st.sidebar.header("📋 Saved Simulations")
+    sims = SimulationDB.get_simulation_list()
+    if sims:
+        df = pd.DataFrame([{'ID': s['id'], 'Name': s['name']} for s in sims])
+        st.sidebar.dataframe(df, use_container_width=True)
+        with st.sidebar.expander("🗑️ Delete Simulations"):
+            to_delete = st.multiselect("Select to delete", [s['name'] for s in sims])
+            if st.sidebar.button("Delete Selected"):
+                for name in to_delete:
+                    for s in sims:
+                        if s['name'] == name:
+                            SimulationDB.delete_simulation(s['id'])
+                st.rerun()
     else:
-        if export_format == "VTK for ParaView (.vts/.pvd)":
-            buffer = BytesIO()
-            with zipfile.ZipFile(buffer, "w", zipfile.ZIP_DEFLATED) as zf:
-                pvd_lines = ['<?xml version="1.0"?>',
-                             '<VTKFile type="Collection" version="0.1">',
-                             '  <Collection>']
-                for sim_id, sim_data in all_sims.items():
-                    folder = f"sim_{sim_id}"
-                    T_final, alpha_final = sim_data['final_3D']
-                    ext = sim_data['metadata']['extents']
-                    t = sim_data['metadata']['final_time']
-                    
-                    vts_str = generate_vts_string(T_final, alpha_final, ext, t)
-                    vts_filename = f"{folder}/final_state.vts"
-                    zf.writestr(vts_filename, vts_str)
-                    pvd_lines.append(f'    <DataSet timestep="{t}" group="" part="0" file="{vts_filename}"/>')
-                    
-                pvd_lines.extend(['  </Collection>', '</VTKFile>'])
-                zf.writestr("paraview_scene.pvd", '\n'.join(pvd_lines))
-            buffer.seek(0)
-            ts = datetime.now().strftime('%Y%m%d_%H%M%S')
-            st.sidebar.download_button("📥 Download VTK ZIP", buffer.getvalue(), f"vtk_export_{ts}.zip", "application/zip")
-            st.sidebar.success("VTK Export ready! Unzip and open the .pvd file in ParaView.")
+        st.sidebar.info("No simulations saved yet.")
+    
+    # Theoretical Documentation
+    with st.sidebar.expander("🔬 Theoretical Soundness & Advanced Analysis", expanded=False):
+        st.markdown("""
+        **Multi‑Stage Arrhenius Kinetics**
+        - **SEI decomposition** (α): first‑order
+        - **Anode reaction**: autocatalytic α(1‑α)
+        - **Cathode & Electrolyte**: (1‑α) decay
+        Each stage has its own activation energy, pre‑exponential, and enthalpy.
 
-        elif export_format == "Raw Numpy Arrays (.npy/.pkl)":
-            buffer = BytesIO()
-            with zipfile.ZipFile(buffer, "w", zipfile.ZIP_DEFLATED) as zf:
-                for sim_id, sim_data in all_sims.items():
-                    folder = f"sim_{sim_id}"
-                    T_final, alpha_final = sim_data['final_3D']
-                    
-                    np_bytes = BytesIO()
-                    np.save(np_bytes, T_final)
-                    zf.writestr(f"{folder}/T_final.npy", np_bytes.getvalue())
-                    
-                    np_bytes = BytesIO()
-                    np.save(np_bytes, alpha_final)
-                    zf.writestr(f"{folder}/alpha_final.npy", np_bytes.getvalue())
-                    
-                    # PKL export (Full history & metadata)
-                    pkl_bytes = BytesIO()
-                    pickle.dump(sim_data, pkl_bytes)
-                    zf.writestr(f"{folder}/full_data.pkl", pkl_bytes.getvalue())
-            buffer.seek(0)
-            ts = datetime.now().strftime('%Y%m%d_%H%M%S')
-            st.sidebar.download_button("📥 Download Numpy ZIP", buffer.getvalue(), f"numpy_export_{ts}.zip", "application/zip")
-            st.sidebar.success("Numpy/PKL Export ready!")
+        **Anisotropic Heat Conduction**
+        - In‑plane conductivity (k_x, k_y) ≈ 25 W/m·K
+        - Through‑thickness (k_z) ≈ 1.5 W/m·K → thermal bottleneck in Z direction
 
-        elif export_format == "Complete Package (ZIP)":
-            buffer = BytesIO()
-            with zipfile.ZipFile(buffer, "w", zipfile.ZIP_DEFLATED) as zf:
-                for sim_id, sim_data in all_sims.items():
-                    folder = f"sim_{sim_id}"
-                    zf.writestr(f"{folder}/params.json", json.dumps(sim_data['params'], indent=2, default=str))
-                    zf.writestr(f"{folder}/metadata.json", json.dumps(sim_data['metadata'], indent=2))
-                    if include_styling:
-                        zf.writestr(f"{folder}/styling.json", json.dumps(advanced_styling, indent=2))
-                    for i, entry in enumerate(sim_data['history']):
-                        df = pd.DataFrame({
-                            'T_mid': entry['T_mid'].flatten(),
-                            'alpha_mid': entry['alpha_mid'].flatten()
-                        })
-                        zf.writestr(f"{folder}/frame_{i:04d}.csv", df.to_csv(index=False))
-                buffer.seek(0)
-            ts = datetime.now().strftime('%Y%m%d_%H%M%S')
-            st.sidebar.download_button("📥 Download ZIP", buffer.getvalue(), f"thermal_simulations_{ts}.zip", "application/zip")
-            st.sidebar.success("Export ready!")
+        **Boundary Conditions**
+        - Convective + radiative losses from all faces
+        - Variable h_conv simulates natural convection (h≈15) or forced/liquid cooling (h≫15)
 
-        elif export_format == "Raw Data CSV":
-            buffer = BytesIO()
-            with zipfile.ZipFile(buffer, "w", zipfile.ZIP_DEFLATED) as zf:
-                for sim_id, sim_data in all_sims.items():
-                    folder = f"sim_{sim_id}"
-                    for i, entry in enumerate(sim_data['history']):
-                        df = pd.DataFrame({
-                            'T_mid': entry['T_mid'].flatten(),
-                            'alpha_mid': entry['alpha_mid'].flatten()
-                        })
-                        zf.writestr(f"{folder}/frame_{i:04d}.csv", df.to_csv(index=False))
-            buffer.seek(0)
-            ts = datetime.now().strftime('%Y%m%d_%H%M%S')
-            st.sidebar.download_button("📥 Download CSV ZIP", buffer.getvalue(), f"csv_export_{ts}.zip", "application/zip")
-            st.sidebar.success("CSV Export ready!")
+        **Multi‑Simulation Value**
+        - Compare different cooling strategies
+        - Study hotspot location/severity
+        - Quantify thermal runaway onset time
+
+        **New Line Profiling**
+        - Extract 1D temperature gradients along any axis
+        - Reveal anisotropic heat propagation
+        - Correlate with α conversion
+
+        **Parameter Correlation**
+        - Scatter plots of any input parameter vs final Tmax
+        - Identify key drivers of thermal runaway
+        """)
+
+    st.caption("🔥 Multi‑Simulation Thermal Runaway Platform • 2026 • Upgraded with Mesh‑Visible Visualisation, CFD-Lite & Realistic Temperatures (R8+)")
 
 # -----------------------------------------------------------------------------
-# 13. Theoretical Documentation
+# Run the app
 # -----------------------------------------------------------------------------
-with st.expander("🔬 Theoretical Soundness & Advanced Analysis", expanded=False):
-    st.markdown("""
-    **Multi‑Stage Arrhenius Kinetics**
-    - **SEI decomposition** (α): first‑order
-    - **Anode reaction**: autocatalytic α(1‑α)
-    - **Cathode & Electrolyte**: (1‑α) decay
-    Each stage has its own activation energy, pre‑exponential, and enthalpy.
-
-    **Anisotropic Heat Conduction**
-    - In‑plane conductivity (k_x, k_y) ≈ 25 W/m·K
-    - Through‑thickness (k_z) ≈ 1.5 W/m·K → thermal bottleneck in Z direction
-
-    **Boundary Conditions**
-    - Convective + radiative losses from all faces
-    - Variable h_conv simulates natural convection (h≈15) or forced/liquid cooling (h≫15)
-
-    **Multi‑Simulation Value**
-    - Compare different cooling strategies
-    - Study hotspot location/severity
-    - Quantify thermal runaway onset time
-
-    **New Line Profiling**
-    - Extract 1D temperature gradients along any axis
-    - Reveal anisotropic heat propagation
-    - Correlate with α conversion
-
-    **Parameter Correlation**
-    - Scatter plots of any input parameter vs final Tmax
-    - Identify key drivers of thermal runaway
-    """)
-
-st.caption("🔥 Multi‑Simulation Thermal Runaway Platform • 2026 • Upgraded with Mesh‑Visible Visualisation & Realistic Temperatures (R8)")
+if __name__ == "__main__":
+    main()
