@@ -1776,7 +1776,7 @@ if operation_mode == "Run New Simulation":
     
     with st.sidebar.expander("Heat & Trigger", expanded=True):
         q_normal = st.number_input("Normal Heat (W/m³)", 0.0, 5e5, 5e4, 1e4, format="%.0f")
-        trigger_temp = st.number_input("Hotspot T (K)", 350, 600, 450, 5,
+        trigger_temp = st.number_input("Hotspot T (K)", 350, 2000, 450, 5,
                                        help="Realistic SEI onset ~400‑450 K")
         trigger_radius = st.slider("Hotspot radius (cells)", 1, 10, 3)
     
@@ -1979,7 +1979,7 @@ if operation_mode == "Run New Simulation":
                             key='time_slider_ms'
                         )
                     with col2:
-                        n_slices = st.slider("Z‑slices", 1, min(20, snapshots[0].shape[2]), 5, key='n_slices_ms')
+                        n_slices = st.slider("Z‑slices", 1, min(1000, snapshots[0].shape[2]), 5, key='n_slices_ms')
                     with col3:
                         show_cross = st.checkbox("Show X/Y cross‑slices", value=False, key='show_cross_ms')
 
