@@ -1969,15 +1969,22 @@ if operation_mode == "Run New Simulation":
                     n_snapshots = len(snapshots)
 
                     # Slider and parameters
-                    col1, col2, col3 = st.columns([2,1,1])
+                    col1, col2, col3 = st.columns([2, 1, 1])
                     with col1:
-                        time_idx = st.slider(
-                            "Time Step",
-                            min_value=0,
-                            max_value=n_snapshots-1,
-                            value=n_snapshots-1,
-                            key='time_slider_ms'
-                        )
+                        if n_snapshots > 1:
+                            time_idx = st.slider(
+                                "Time Step",
+                                min_value=0,
+                                max_value=n_snapshots - 1,
+                                value=n_snapshots - 1,
+                                step=1,
+                                help="Select a saved snapshot to visualise"
+                            )
+                        else:
+                            time_idx = 0
+                            st.info("Only one snapshot available — "
+                                    "increase simulation time or decrease "
+                                    "snapshot interval to enable the slider.")
                     with col2:
                         n_slices = st.slider("Z‑slices", 2, 10000, min(10, mesh_shape[2]), key='n_slices_ms')
                     with col3:
