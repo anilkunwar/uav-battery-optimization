@@ -8,6 +8,9 @@
 #   - Pre-simulation diagnostics
 #   - Fixed Plotly colorbar syntax (titleside → title=dict(...))
 #   - Slices now avoid boundaries (all requested slices are visible)
+#   - Cross-slices are optional and less intrusive
+#   - Removed invalid flatshading for go.Surface
+#   - Z-slice slider range dynamically adapts to mesh
 # =============================================================================
 
 import streamlit as st
@@ -812,7 +815,7 @@ def create_mesh_aware_3d_thermal(T_3d, extents, style_params,
             colorbar=colorbar_config,  # ✅ FIXED
             showscale=True,
             opacity=0.9,
-            flatshading=False,
+            # flatshading=False,        # ❌ REMOVED – invalid for go.Surface
             lighting=dict(ambient=0.6, diffuse=0.4, specular=0.1)
         ))
         
@@ -849,7 +852,8 @@ def create_mesh_aware_3d_thermal(T_3d, extents, style_params,
             colorscale=pl_colorscale,
             colorbar=colorbar_config,  # ✅ FIXED
             showscale=True,
-            opacity=0.9
+            opacity=0.9,
+            lighting=dict(ambient=0.6, diffuse=0.4, specular=0.1)
         ))
         if show_mesh:
             step_x = max(1, Nx // 15)
@@ -883,7 +887,8 @@ def create_mesh_aware_3d_thermal(T_3d, extents, style_params,
             colorscale=pl_colorscale,
             colorbar=colorbar_config,  # ✅ FIXED
             showscale=True,
-            opacity=0.9
+            opacity=0.9,
+            lighting=dict(ambient=0.6, diffuse=0.4, specular=0.1)
         ))
         if show_mesh:
             step_y = max(1, Ny // 15)
@@ -950,13 +955,14 @@ def create_mesh_aware_3d_thermal(T_3d, extents, style_params,
     return fig
 
 
-def create_multi_slice_3d_visualization(T_3d, extents, style_params, n_slices=5):
+def create_multi_slice_3d_visualization(T_3d, extents, style_params, n_slices=5, show_cross_slices=False):
     """
     Create a 3D visualization with multiple slices showing the full domain.
     FIXED: 
       1. Correct colorbar syntax
       2. Slices now avoid boundaries to be fully visible
       3. All requested slices are rendered
+      4. Cross-slices (X/Y center planes) are optional and less opaque
     """
     Nx, Ny, Nz = T_3d.shape
     ext_x = extents['x']; ext_y = extents['y']; ext_z = extents['z']
@@ -1039,62 +1045,64 @@ def create_multi_slice_3d_visualization(T_3d, extents, style_params, n_slices=5)
                 hoverinfo='skip'
             ))
     
-    # Y-direction slice (vertical through center)
-    ky = Ny // 2
-    X, Z = np.meshgrid(x, z, indexing='ij')
-    Y_pos = np.full_like(X, y[ky])
-    T_slice = T_3d[:, ky, :]
-    fig.add_trace(go.Surface(
-        x=X, y=Y_pos, z=Z,
-        surfacecolor=T_slice,
-        colorscale=pl_colorscale,
-        showscale=False,
-        opacity=0.6,
-        name=f'Y-center slice'
-    ))
-    # Add mesh on Y-slice
-    step_x = max(1, Nx // 10)
-    step_z = max(1, Nz // 8)
-    for i in range(0, Nx, step_x):
-        fig.add_trace(go.Scatter3d(
-            x=[x[i], x[i]], y=[y[ky], y[ky]], z=[ext_z[0], ext_z[1]],
-            mode='lines', line=dict(color='darkblue', width=0.5),
-            opacity=0.3, showlegend=False, hoverinfo='skip'
+    # ---- Y-direction slice (vertical through center) ----
+    if show_cross_slices:
+        ky = Ny // 2
+        X, Z = np.meshgrid(x, z, indexing='ij')
+        Y_pos = np.full_like(X, y[ky])
+        T_slice = T_3d[:, ky, :]
+        fig.add_trace(go.Surface(
+            x=X, y=Y_pos, z=Z,
+            surfacecolor=T_slice,
+            colorscale=pl_colorscale,
+            showscale=False,
+            opacity=0.25,                # reduced from 0.6 to look like a cut-plane
+            name=f'Y-center slice'
         ))
-    for k in range(0, Nz, step_z):
-        fig.add_trace(go.Scatter3d(
-            x=[ext_x[0], ext_x[1]], y=[y[ky], y[ky]], z=[z[k], z[k]],
-            mode='lines', line=dict(color='darkblue', width=0.5),
-            opacity=0.3, showlegend=False, hoverinfo='skip'
-        ))
+        # Add mesh on Y-slice
+        step_x = max(1, Nx // 10)
+        step_z = max(1, Nz // 8)
+        for i in range(0, Nx, step_x):
+            fig.add_trace(go.Scatter3d(
+                x=[x[i], x[i]], y=[y[ky], y[ky]], z=[ext_z[0], ext_z[1]],
+                mode='lines', line=dict(color='darkblue', width=0.5),
+                opacity=0.3, showlegend=False, hoverinfo='skip'
+            ))
+        for k in range(0, Nz, step_z):
+            fig.add_trace(go.Scatter3d(
+                x=[ext_x[0], ext_x[1]], y=[y[ky], y[ky]], z=[z[k], z[k]],
+                mode='lines', line=dict(color='darkblue', width=0.5),
+                opacity=0.3, showlegend=False, hoverinfo='skip'
+            ))
     
-    # X-direction slice (vertical through center)
-    kx = Nx // 2
-    Y, Z = np.meshgrid(y, z, indexing='ij')
-    X_pos = np.full_like(Y, x[kx])
-    T_slice = T_3d[kx, :, :]
-    fig.add_trace(go.Surface(
-        x=X_pos, y=Y, z=Z,
-        surfacecolor=T_slice,
-        colorscale=pl_colorscale,
-        showscale=False,
-        opacity=0.6,
-        name=f'X-center slice'
-    ))
-    # Add mesh on X-slice
-    step_y = max(1, Ny // 10)
-    for j in range(0, Ny, step_y):
-        fig.add_trace(go.Scatter3d(
-            x=[x[kx], x[kx]], y=[y[j], y[j]], z=[ext_z[0], ext_z[1]],
-            mode='lines', line=dict(color='darkgreen', width=0.5),
-            opacity=0.3, showlegend=False, hoverinfo='skip'
+    # ---- X-direction slice (vertical through center) ----
+    if show_cross_slices:
+        kx = Nx // 2
+        Y, Z = np.meshgrid(y, z, indexing='ij')
+        X_pos = np.full_like(Y, x[kx])
+        T_slice = T_3d[kx, :, :]
+        fig.add_trace(go.Surface(
+            x=X_pos, y=Y, z=Z,
+            surfacecolor=T_slice,
+            colorscale=pl_colorscale,
+            showscale=False,
+            opacity=0.25,                # reduced from 0.6
+            name=f'X-center slice'
         ))
-    for k in range(0, Nz, step_z):
-        fig.add_trace(go.Scatter3d(
-            x=[x[kx], x[kx]], y=[ext_y[0], ext_y[1]], z=[z[k], z[k]],
-            mode='lines', line=dict(color='darkgreen', width=0.5),
-            opacity=0.3, showlegend=False, hoverinfo='skip'
-        ))
+        # Add mesh on X-slice
+        step_y = max(1, Ny // 10)
+        for j in range(0, Ny, step_y):
+            fig.add_trace(go.Scatter3d(
+                x=[x[kx], x[kx]], y=[y[j], y[j]], z=[ext_z[0], ext_z[1]],
+                mode='lines', line=dict(color='darkgreen', width=0.5),
+                opacity=0.3, showlegend=False, hoverinfo='skip'
+            ))
+        for k in range(0, Nz, step_z):
+            fig.add_trace(go.Scatter3d(
+                x=[x[kx], x[kx]], y=[ext_y[0], ext_y[1]], z=[z[k], z[k]],
+                mode='lines', line=dict(color='darkgreen', width=0.5),
+                opacity=0.3, showlegend=False, hoverinfo='skip'
+            ))
     
     # Domain boundary box
     box_lines = [
@@ -1807,8 +1815,15 @@ if operation_mode == "Run New Simulation":
 
             with tab1:
                 st.markdown("**Multiple cross‑sections clearly show the computational mesh.**")
-                n_slices = st.slider("Number of Z-slices", 2, 10000, 5000, key='n_slices')
-                fig_ms = create_multi_slice_3d_visualization(T_final, ext, advanced_styling, n_slices=n_slices)
+                # Dynamically adjust slider range to actual number of interior Z-slices
+                max_slices = max(2, mesh_shape[2] - 2)   # ensure at least 2
+                n_slices = st.slider("Number of Z-slices", 2, max_slices, min(10, max_slices), key='n_slices')
+                show_cross = st.checkbox("Show vertical X/Y centre slices (cross)", False, key='show_cross')
+                fig_ms = create_multi_slice_3d_visualization(
+                    T_final, ext, advanced_styling,
+                    n_slices=n_slices,
+                    show_cross_slices=show_cross
+                )
                 st.plotly_chart(fig_ms, use_container_width=True)
 
             with tab2:
