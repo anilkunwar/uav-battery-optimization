@@ -1166,56 +1166,61 @@ def create_2d_heatmap_with_mesh(T_2d, extents_xy, style_params,
                                  mesh_alpha=0.3, mesh_linewidth=0.5):
     """
     Create a 2D heatmap that CLEARLY SHOWS THE MESH GRID using pcolormesh with edgecolors.
-    FIXED: shading='nearest' allows same shape as coordinates and supports edge rendering.
+    FIXED: Corrected dimension unpacking (n_x, n_y = T_2d.shape) and meshgrid indexing.
     """
     import matplotlib.pyplot as plt
     from matplotlib.collections import QuadMesh
-    
+
     cmap_name = style_params.get('cmap', 'hot')
-    
+
     fig, ax = plt.subplots(figsize=(10, 8))
-    
-    Ny, Nx = T_2d.shape
-    x = np.linspace(extents_xy[0], extents_xy[1], Nx)
-    y = np.linspace(extents_xy[2], extents_xy[3], Ny)
+
+    # ✅ FIX: T_2d comes from T_final[:, :, mid_z] with shape (Nx, Ny).
+    # Must unpack as n_x, n_y in order, NOT Ny, Nx.
+    n_x, n_y = T_2d.shape
+
+    x = np.linspace(extents_xy[0], extents_xy[1], n_x)
+    y = np.linspace(extents_xy[2], extents_xy[3], n_y)
+
+    # ✅ FIX: indexing='ij' ensures X, Y have shape (n_x, n_y), matching T_2d
     X, Y = np.meshgrid(x, y, indexing='ij')
-    
+
     if show_mesh:
         # Use shading='nearest' – accepts C with same shape as X/Y and supports edgecolors
         pcm = ax.pcolormesh(
             X, Y, T_2d,
             cmap=cmap_name,
-            shading='nearest',          # <-- FIX: works with vertex data and edge colors
+            shading='nearest',          # works with vertex data and edge colors
             edgecolors=mesh_color,
             linewidth=mesh_linewidth,
             alpha=1.0 - mesh_alpha
         )
         # Add node markers at intersections
-        node_step_x = max(1, Nx // 10)
-        node_step_y = max(1, Ny // 10)
-        for i in range(0, Nx, node_step_x):
-            for j in range(0, Ny, node_step_y):
+        node_step_x = max(1, n_x // 10)
+        node_step_y = max(1, n_y // 10)
+        for i in range(0, n_x, node_step_x):
+            for j in range(0, n_y, node_step_y):
                 ax.plot(x[i], y[j], 'o', color=mesh_color, 
                        markersize=3, alpha=mesh_alpha + 0.2)
     else:
         # In the fallback, also use 'nearest' to keep consistency
         pcm = ax.pcolormesh(X, Y, T_2d, cmap=cmap_name, shading='nearest')
-    
+
     cbar = plt.colorbar(pcm, ax=ax, label='Temperature (K)', shrink=0.85)
     cbar.ax.tick_params(labelsize=11)
-    
+
     ax.set_xlabel('X (m)', fontsize=13, fontweight='bold')
     ax.set_ylabel('Y (m)', fontsize=13, fontweight='bold')
-    ax.set_title(f'2D Thermal Field (Mesh: {Nx}×{Ny}) | T: {T_2d.min():.1f} - {T_2d.max():.1f} K',
+    ax.set_title(f'2D Thermal Field (Mesh: {n_x}×{n_y}) | T: {T_2d.min():.1f} - {T_2d.max():.1f} K',
                 fontsize=14, fontweight='bold')
     ax.set_aspect('equal')
-    
+
     # Grid info text
-    textstr = f'Grid: {Nx}×{Ny}\nΔx = {(x[1]-x[0])*1000:.2f} mm\nΔy = {(y[1]-y[0])*1000:.2f} mm'
+    textstr = f'Grid: {n_x}×{n_y}\nΔx = {(x[1]-x[0])*1000:.2f} mm\nΔy = {(y[1]-y[0])*1000:.2f} mm'
     props = dict(boxstyle='round', facecolor='white', alpha=0.8, edgecolor='gray')
     ax.text(0.02, 0.98, textstr, transform=ax.transAxes, fontsize=10,
             verticalalignment='top', bbox=props)
-    
+
     fig = EnhancedFigureStyler.apply_publication_styling(fig, ax, style_params)
     return fig
 
@@ -1786,7 +1791,7 @@ if operation_mode == "Run New Simulation":
     sims = SimulationDB.get_simulation_list()
     if sims:
         df = pd.DataFrame([{'ID': s['id'], 'Name': s['name']} for s in sims])
-        st.dataframe(df, use_container_width=True)
+        st.dataframe(df, width="stretch")  # ✅ Fixed deprecation
         with st.expander("🗑️ Delete Simulations"):
             to_delete = st.multiselect("Select to delete", [s['name'] for s in sims])
             if st.button("Delete Selected"):
