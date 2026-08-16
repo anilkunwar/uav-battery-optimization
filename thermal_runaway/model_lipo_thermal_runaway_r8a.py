@@ -1307,10 +1307,11 @@ def run_simulation(params, progress_callback=None):
     mid_z = Nz // 2
 
     # --- NEW: Temporal snapshots ---
-    snapshots_3d = []
-    snapshot_times = []
+    # Always capture initial state so we have at least one snapshot
+    snapshots_3d = [T.copy()]
+    snapshot_times = [0.0]
     snapshot_interval = max(1.0, t_max / 20.0)  # ~20 snapshots max to save memory
-    next_snapshot_time = 0.0
+    next_snapshot_time = snapshot_interval  # Next snapshot after one full interval
 
     while t < t_max:
         if enable_cfd and U is not None:
@@ -1355,6 +1356,11 @@ def run_simulation(params, progress_callback=None):
             
         if progress_callback is not None and step % ui_throttle == 0:
             progress_callback(min(t / t_max, 1.0))
+
+    # Ensure final state is always captured (handles early termination)
+    if len(snapshots_3d) < 2 or snapshot_times[-1] < t * 0.95:
+        snapshots_3d.append(T.copy())
+        snapshot_times.append(t)
 
     history = []
     for idx in range(len(times)):
@@ -1903,12 +1909,23 @@ if operation_mode == "Run New Simulation":
                 snapshots = sim_data['snapshots_3d']
                 times = sim_data['snapshot_times']
                 n_snapshots = len(snapshots)
-                
-                time_idx = st.slider("⏱️ Time Step", 0, n_snapshots-1, n_snapshots-1, key='time_slider_3d')
+
+                if n_snapshots > 1:
+                    time_idx = st.slider(
+                        "⏱️ Time Step", 0, n_snapshots - 1,
+                        n_snapshots - 1, key='time_slider_3d'
+                    )
+                else:
+                    time_idx = 0
+                    st.info(
+                        "Only one 3D snapshot was captured (simulation may have "
+                        "terminated early). Increase **Duration (s)** or **Safety "
+                        "Cutoff Temp (K)** in the sidebar for temporal evolution."
+                    )
+
                 current_T = snapshots[time_idx]
                 current_time = times[time_idx]
-                
-                col_m1, col_m2, col_m3 = st.columns(3)
+                                col_m1, col_m2, col_m3 = st.columns(3)
                 col_m1.metric("Current Time", f"{current_time:.2f} s")
                 col_m2.metric("Max Temp", f"{np.max(current_T):.1f} K")
                 col_m3.metric("Min Temp", f"{np.min(current_T):.1f} K")
