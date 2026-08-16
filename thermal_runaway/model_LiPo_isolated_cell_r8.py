@@ -1,7 +1,7 @@
 # =============================================================================
 # Streamlit App: FPV LiPo 3D Thermal Runaway Multi-Simulation Platform
 # =============================================================================
-# UPGRADED VERSION R10-PATCHED-2 (Fixed pcolormesh, raw strings, Streamlit deprecation, smoke viz numpy scalars, np.where index order):
+# UPGRADED VERSION R10-PATCHED-3 (Fixed pcolormesh, raw strings, Streamlit deprecation, smoke viz numpy scalars, np.where index order, Plotly axis font nesting):
 #   - Added Battery Chemistry Presets (NMC, LFP, NCA, LCO)
 #   - Global Internal Energy Tracking (Joules) over time
 #   - 3D CFD Velocity Vector Field (Buoyancy-driven flow cones)
@@ -1049,7 +1049,6 @@ def create_smoke_thermal_combined_visualization(T_3d, smoke_xyz, extents, style_
             x=bx, y=by, z=bz, mode='lines', line=dict(color='#2c3e50', width=2), showlegend=False, hoverinfo='skip'
         ))
 
-    # FIX: Cast numpy scalars to Python floats before passing to Plotly
     if len(px) > 0:
         z_max_smoke = float(np.max(pz)) if hasattr(pz, '__len__') and len(pz) > 0 else float(ext_z[1])
     else:
@@ -1062,9 +1061,10 @@ def create_smoke_thermal_combined_visualization(T_3d, smoke_xyz, extents, style_
 
     fig.update_layout(
         scene=dict(
-            xaxis=dict(title='X (m)', font=dict(size=14)),
-            yaxis=dict(title='Y (m)', font=dict(size=14)),
-            zaxis=dict(title='Z (m)', font=dict(size=14), range=[float(ext_z[0]), z_plot_max]),
+            # FIX: Moved 'font' inside the 'title' dict for each axis
+            xaxis=dict(title=dict(text='X (m)', font=dict(size=14))),
+            yaxis=dict(title=dict(text='Y (m)', font=dict(size=14))),
+            zaxis=dict(title=dict(text='Z (m)', font=dict(size=14)), range=[float(ext_z[0]), z_plot_max]),
             aspectmode='data', camera=dict(eye=dict(x=1.2, y=1.2, z=0.6))
         ),
         title=dict(
