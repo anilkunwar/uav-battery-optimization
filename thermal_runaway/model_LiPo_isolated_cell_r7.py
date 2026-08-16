@@ -4,14 +4,13 @@
 # UPGRADED VERSION:
 #   - Realistic trigger temperature: default 450 K
 #   - Mesh-visible 3D visualisation (multi-slice + wireframe)
-#   - 2D pcolormesh with edge colours
+#   - 2D pcolormesh with edge colours (now using shading='nearest')
 #   - Pre-simulation diagnostics
 #   - Fixed Plotly colorbar syntax (titleside → title=dict(...))
 #   - Slices now avoid boundaries (all requested slices are visible)
 #   - Cross-slices are optional and less intrusive
 #   - Removed invalid flatshading for go.Surface and go.Mesh3d
 #   - Z-slice slider range dynamically adapts to mesh
-#   - Fixed pcolormesh shading to 'auto' (fixes dimension mismatch)
 #   - Updated Plotly chart width to 'stretch' (replaces deprecated use_container_width)
 # =============================================================================
 
@@ -1167,7 +1166,7 @@ def create_2d_heatmap_with_mesh(T_2d, extents_xy, style_params,
                                  mesh_alpha=0.3, mesh_linewidth=0.5):
     """
     Create a 2D heatmap that CLEARLY SHOWS THE MESH GRID using pcolormesh with edgecolors.
-    FIXED: shading='auto' to handle vertex-level data correctly.
+    FIXED: shading='nearest' allows same shape as coordinates and supports edge rendering.
     """
     import matplotlib.pyplot as plt
     from matplotlib.collections import QuadMesh
@@ -1182,11 +1181,11 @@ def create_2d_heatmap_with_mesh(T_2d, extents_xy, style_params,
     X, Y = np.meshgrid(x, y, indexing='ij')
     
     if show_mesh:
-        # Use shading='auto' to automatically handle the vertex data shape
+        # Use shading='nearest' – accepts C with same shape as X/Y and supports edgecolors
         pcm = ax.pcolormesh(
             X, Y, T_2d,
             cmap=cmap_name,
-            shading='auto',          # <-- FIX: 'auto' works with vertex-level data
+            shading='nearest',          # <-- FIX: works with vertex data and edge colors
             edgecolors=mesh_color,
             linewidth=mesh_linewidth,
             alpha=1.0 - mesh_alpha
@@ -1199,7 +1198,8 @@ def create_2d_heatmap_with_mesh(T_2d, extents_xy, style_params,
                 ax.plot(x[i], y[j], 'o', color=mesh_color, 
                        markersize=3, alpha=mesh_alpha + 0.2)
     else:
-        pcm = ax.pcolormesh(X, Y, T_2d, cmap=cmap_name, shading='gouraud')
+        # In the fallback, also use 'nearest' to keep consistency
+        pcm = ax.pcolormesh(X, Y, T_2d, cmap=cmap_name, shading='nearest')
     
     cbar = plt.colorbar(pcm, ax=ax, label='Temperature (K)', shrink=0.85)
     cbar.ax.tick_params(labelsize=11)
