@@ -1017,11 +1017,6 @@ def create_multi_slice_3d_visualization(T_3d, extents, style_params,
     y = np.linspace(ext_y[0], ext_y[1], Ny)
     z = np.linspace(ext_z[0], ext_z[1], Nz)
 
-    # ---- FIX: cap n_slices to available interior planes ----
-    max_slices = max(1, Nz - 2)
-    if n_slices > max_slices:
-        n_slices = max_slices
-
     cmap_name = style_params.get('cmap', 'hot')
     pl_colorscale = matplotlib_to_plotly(cmap_name, pl_entries=20)
 
@@ -1094,7 +1089,7 @@ def create_multi_slice_3d_visualization(T_3d, extents, style_params,
                     opacity=mesh_opacity, showlegend=False, hoverinfo='skip'
                 ))
 
-    # Cross-slices (optional) – unchanged
+    # Cross-slices (optional)
     if show_cross_slices:
         ky = Ny // 2
         X, Z = np.meshgrid(x, z, indexing='ij')
@@ -1141,7 +1136,7 @@ def create_multi_slice_3d_visualization(T_3d, extents, style_params,
                 opacity=0.3, showlegend=False, hoverinfo='skip'
             ))
 
-    # Domain boundary box – unchanged
+    # Domain boundary box
     box_lines = [
         ([ext_x[0], ext_x[1]], [ext_y[0], ext_y[0]], [ext_z[0], ext_z[0]]),
         ([ext_x[0], ext_x[1]], [ext_y[1], ext_y[1]], [ext_z[0], ext_z[0]]),
@@ -1165,6 +1160,7 @@ def create_multi_slice_3d_visualization(T_3d, extents, style_params,
             name='Domain Boundary', hoverinfo='skip', showlegend=False
         ))
 
+    # Corner nodes
     corners_x = [ext_x[0], ext_x[1], ext_x[0], ext_x[1], ext_x[0], ext_x[1], ext_x[0], ext_x[1]]
     corners_y = [ext_y[0], ext_y[0], ext_y[1], ext_y[1], ext_y[0], ext_y[0], ext_y[1], ext_y[1]]
     corners_z = [ext_z[0], ext_z[0], ext_z[0], ext_z[0], ext_z[1], ext_z[1], ext_z[1], ext_z[1]]
@@ -1341,10 +1337,7 @@ def run_simulation(params, progress_callback=None):
     # ---- Snapshot storage ----
     snapshots_3d = []
     snapshot_times = []
-    # ---- FIX: store initial snapshot at t=0 ----
-    snapshots_3d.append(T.copy())
-    snapshot_times.append(0.0)
-    next_snapshot_time = snapshot_interval  # next snapshot after interval
+    next_snapshot_time = 0.0
 
     while t < sim_time:
         # Adaptive dt
@@ -1382,7 +1375,7 @@ def run_simulation(params, progress_callback=None):
         if progress_callback is not None and step % ui_throttle == 0:
             progress_callback(min(t / sim_time, 1.0))
 
-    # Ensure final snapshot is stored (if not already)
+    # Ensure final snapshot is stored
     if len(snapshots_3d) == 0 or snapshot_times[-1] < t - dt:
         snapshots_3d.append(T.copy())
         snapshot_times.append(t)
@@ -1761,7 +1754,7 @@ if operation_mode == "Run New Simulation":
         with col2:
             Ny = st.number_input("Ny", 10, 100, 40, 5)
         with col3:
-            Nz = st.number_input("Nz", 5, 10000, 20, 5)
+            Nz = st.number_input("Nz", 5, 40, 20, 5)
         # Dimensions
         col1, col2, col3 = st.columns(3)
         with col1:
@@ -1976,33 +1969,17 @@ if operation_mode == "Run New Simulation":
                     n_snapshots = len(snapshots)
 
                     # Slider and parameters
-                    col1, col2, col3 = st.columns([2, 1, 1])
+                    col1, col2, col3 = st.columns([2,1,1])
                     with col1:
-                        if n_snapshots > 1:
-                            time_idx = st.slider(
-                                "Time Step",
-                                min_value=0,
-                                max_value=n_snapshots - 1,
-                                value=n_snapshots - 1,
-                                step=1,
-                                help="Select a saved snapshot to visualise"
-                            )
-                        else:
-                            time_idx = 0
-                            st.info("Only one snapshot available — "
-                                    "increase simulation time or decrease "
-                                    "snapshot interval to enable the slider.")
-                    with col2:
-                        # ---- FIX: cap Z-slices slider to a sensible max ----
-                        max_slices = max(2, min(mesh_shape[2] - 2, 20))  # at most 20 slices
-                        default_slices = min(5, max_slices)
-                        n_slices = st.slider(
-                            "Z‑slices",
-                            min_value=2,
-                            max_value=max_slices,
-                            value=default_slices,
-                            key='n_slices_ms'
+                        time_idx = st.slider(
+                            "Time Step",
+                            min_value=0,
+                            max_value=n_snapshots-1,
+                            value=n_snapshots-1,
+                            key='time_slider_ms'
                         )
+                    with col2:
+                        n_slices = st.slider("Z‑slices", 1, min(20, snapshots[0].shape[2]), 5, key='n_slices_ms')
                     with col3:
                         show_cross = st.checkbox("Show X/Y cross‑slices", value=False, key='show_cross_ms')
 
