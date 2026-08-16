@@ -17,7 +17,7 @@ simulation runs from v5 and beyond
 
 [![meaningtowords](https://img.shields.io/badge/thermarunawaybattery-v7.0-green)](https://isolated-cell-lipo-thermal-runaway-model7.streamlit.app/) ( progress bar in simulation v5 will jump to 1-2% almost immediately , fixes CFL timestep , adaptive dt and throttling the UI i.e. Progress callback only shows up every 200 steps, sidebar for variation of these numerical finetuning cfl, progress monitor, 3D rendering, robust postprocessing available in the app ,robust visualization, 3D rendering for visualization of results)
 
-Expanded v7
+Expanded v7 (7b - T does not exceed beyond 303.1 K)
 
 [![meaningtowords](https://img.shields.io/badge/thermarunawaybattery-v7a.0-green)](https://thermal-runaway-lipo3dmodel7a.streamlit.app/) ( progress bar in simulation v5 will jump to 1-2% almost immediately , fixes CFL timestep , adaptive dt and throttling the UI i.e. Progress callback only shows up every 200 steps, sidebar for variation of these numerical finetuning cfl, progress monitor, 3D rendering, robust postprocessing available in the app ,robust visualization, 3D rendering for visualization of results)
 
