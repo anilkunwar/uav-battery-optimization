@@ -1,7 +1,7 @@
 # =============================================================================
 # Streamlit App: FPV LiPo 3D Thermal Runaway Multi-Simulation Platform
 # =============================================================================
-# UPGRADED VERSION R10-PATCHED (Fixed pcolormesh dimensions, raw strings, Streamlit deprecation):
+# UPGRADED VERSION R10-PATCHED-2 (Fixed pcolormesh, raw strings, Streamlit deprecation, smoke viz numpy scalars, np.where index order):
 #   - Added Battery Chemistry Presets (NMC, LFP, NCA, LCO)
 #   - Global Internal Energy Tracking (Joules) over time
 #   - 3D CFD Velocity Vector Field (Buoyancy-driven flow cones)
@@ -1022,8 +1022,9 @@ def create_smoke_thermal_combined_visualization(T_3d, smoke_xyz, extents, style_
     if len(px) > 0:
         smoke_colors = []
         for op in popacity:
-            gray_val = int(80 + 175 * op)
-            smoke_colors.append(f'rgba({gray_val},{gray_val},{gray_val},{max(0.05, op*0.6)})')
+            gray_val = int(80 + 175 * float(op))
+            alpha_val = max(0.05, float(op) * 0.6)
+            smoke_colors.append(f'rgba({gray_val},{gray_val},{gray_val},{alpha_val})')
         fig.add_trace(go.Scatter3d(
             x=px, y=py, z=pz, mode='markers',
             marker=dict(size=2, color=smoke_colors, opacity=0.6),
@@ -1047,18 +1048,27 @@ def create_smoke_thermal_combined_visualization(T_3d, smoke_xyz, extents, style_
         fig.add_trace(go.Scatter3d(
             x=bx, y=by, z=bz, mode='lines', line=dict(color='#2c3e50', width=2), showlegend=False, hoverinfo='skip'
         ))
-    z_max_smoke = max(pz) if len(pz) > 0 else ext_z[1]
-    z_plot_max = max(ext_z[1] * 1.5, z_max_smoke * 1.1)
-    T_min, T_max = np.min(T_3d), np.max(T_3d)
+
+    # FIX: Cast numpy scalars to Python floats before passing to Plotly
+    if len(px) > 0:
+        z_max_smoke = float(np.max(pz)) if hasattr(pz, '__len__') and len(pz) > 0 else float(ext_z[1])
+    else:
+        z_max_smoke = float(ext_z[1])
+    z_plot_max = float(max(ext_z[1] * 1.5, z_max_smoke * 1.1))
+
+    T_min = float(np.min(T_3d))
+    T_max = float(np.max(T_3d))
+    n_particles = len(px) if hasattr(px, '__len__') else 0
+
     fig.update_layout(
         scene=dict(
             xaxis=dict(title='X (m)', font=dict(size=14)),
             yaxis=dict(title='Y (m)', font=dict(size=14)),
-            zaxis=dict(title='Z (m)', font=dict(size=14), range=[ext_z[0], z_plot_max]),
+            zaxis=dict(title='Z (m)', font=dict(size=14), range=[float(ext_z[0]), z_plot_max]),
             aspectmode='data', camera=dict(eye=dict(x=1.2, y=1.2, z=0.6))
         ),
         title=dict(
-            text=f'🔥 Thermal Field + 💨 Smoke Plume | T: {T_min:.1f} - {T_max:.1f} K | {len(px)} particles',
+            text=f'🔥 Thermal Field + 💨 Smoke Plume | T: {T_min:.1f} - {T_max:.1f} K | {n_particles} particles',
             x=0.5, font=dict(size=16)),
         height=750, margin=dict(l=0, r=0, b=0, t=50),
         legend=dict(yanchor='top', y=0.99, xanchor='left', x=0.01, font=dict(size=11))
@@ -1904,13 +1914,14 @@ if operation_mode == "Run New Simulation":
                 if cfd_data is not None:
                     U, V, W, P, C = cfd_data
                     threshold = 0.1
-                    z_idx, y_idx, x_idx = np.where(C > threshold)
+                    # np.where on C[Nx,Ny,Nz] returns (dim0,dim1,dim2) = (x,y,z)
+                    x_idx, y_idx, z_idx = np.where(C > threshold)
                     if len(x_idx) > 0:
                         Nx_mesh, Ny_mesh, Nz_mesh = mesh_shape
                         px = ext['x'][0] + x_idx * (ext['x'][1]-ext['x'][0])/(Nx_mesh-1)
                         py = ext['y'][0] + y_idx * (ext['y'][1]-ext['y'][0])/(Ny_mesh-1)
                         pz = ext['z'][0] + z_idx * (ext['z'][1]-ext['z'][0])/(Nz_mesh-1)
-                        popacity = C[z_idx, y_idx, x_idx]
+                        popacity = C[x_idx, y_idx, z_idx]
                     else:
                         px, py, pz, popacity = [], [], [], []
                 else:
