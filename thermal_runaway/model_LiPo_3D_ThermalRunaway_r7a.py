@@ -1024,7 +1024,7 @@ def create_mesh_aware_3d_thermal(T_3d, extents, style_params,
 
     def make_axis(template, title_text, rng):
         d = template.copy()
-        d['title'] = dict(text=title_text, font=dict(size=label_size, color=title_color), standoff=10)
+        d['title'] = dict(text=title_text, font=dict(size=label_size, color=title_color))
         d['range'] = rng
         return d
 
@@ -1246,7 +1246,7 @@ def create_multi_slice_3d_visualization(T_3d, extents, style_params,
 
     def make_axis(template, title_text, rng):
         d = template.copy()
-        d['title'] = dict(text=title_text, font=dict(size=label_size, color=title_color), standoff=10)
+        d['title'] = dict(text=title_text, font=dict(size=label_size, color=title_color))
         d['range'] = rng
         return d
 
