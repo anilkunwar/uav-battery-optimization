@@ -23,7 +23,7 @@ Expanded v7
 
 [![meaningtowords](https://img.shields.io/badge/thermarunawaybattery-v7b.0-green)](https://thermal-runaway-lipo3dmodel7b.streamlit.app/) (temporal slider in the 3D visualization, progress bar in simulation v5 will jump to 1-2% almost immediately , fixes CFL timestep , adaptive dt and throttling the UI i.e. Progress callback only shows up every 200 steps, sidebar for variation of these numerical finetuning cfl, progress monitor, 3D rendering, robust postprocessing available in the app ,robust visualization, 3D rendering for visualization of results)
 
-[![meaningtowords](https://img.shields.io/badge/thermarunawaybattery-v7c.0-red)](https://thermal-runaway-lipo3dmodel7b.streamlit.app/) (temporal slider in the 3D visualization, progress bar in simulation v5 will jump to 1-2% almost immediately , fixes CFL timestep , adaptive dt and throttling the UI i.e. Progress callback only shows up every 200 steps, sidebar for variation of these numerical finetuning cfl, progress monitor, 3D rendering, robust postprocessing available in the app ,robust visualization, 3D rendering for visualization of results)
+[![meaningtowords](https://img.shields.io/badge/thermarunawaybattery-v7c.0-red)](https://thermal-runaway-lipo3dmodel7c.streamlit.app/) (temporal slider in the 3D visualization, progress bar in simulation v5 will jump to 1-2% almost immediately , fixes CFL timestep , adaptive dt and throttling the UI i.e. Progress callback only shows up every 200 steps, sidebar for variation of these numerical finetuning cfl, progress monitor, 3D rendering, robust postprocessing available in the app ,robust visualization, 3D rendering for visualization of results)
 
 
 CFD integration in Thermal Simulations after v8
