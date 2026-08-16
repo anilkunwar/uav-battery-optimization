@@ -1,7 +1,7 @@
 # =============================================================================
 # Streamlit App: FPV LiPo 3D Thermal Runaway Multi-Simulation Platform
 # =============================================================================
-# UPGRADED VERSION R10 (Energy Tracking, CFD Vectors & Chemistry Presets):
+# UPGRADED VERSION R10-PATCHED (Fixed pcolormesh dimensions, raw strings, Streamlit deprecation):
 #   - Added Battery Chemistry Presets (NMC, LFP, NCA, LCO)
 #   - Global Internal Energy Tracking (Joules) over time
 #   - 3D CFD Velocity Vector Field (Buoyancy-driven flow cones)
@@ -654,9 +654,9 @@ def plot_initial_domain_sketch(params):
     ax.add_patch(hotspot)
     arrow_style = dict(arrowstyle='->', color='#e67e22', lw=2, mutation_scale=20)
     ax.annotate('', xy=(Lx/2, Lz + margin*0.6), xytext=(Lx/2, Lz), arrowprops=arrow_style)
-    ax.text(Lx/2 + 0.002, Lz + margin*0.6, 'Convection ($h$) + Radiation ($\epsilon$)', fontsize=11, color='#d35400', ha='left', fontweight='bold')
+    ax.text(Lx/2 + 0.002, Lz + margin*0.6, r'Convection ($h$) + Radiation ($\epsilon$)', fontsize=11, color='#d35400', ha='left', fontweight='bold')
     ax.annotate('', xy=(Lx/2, -margin*0.6), xytext=(Lx/2, 0), arrowprops=arrow_style)
-    ax.text(Lx/2 + 0.002, -margin*0.6, 'Convection ($h$) + Radiation ($\epsilon$)', fontsize=11, color='#d35400', ha='left', fontweight='bold')
+    ax.text(Lx/2 + 0.002, -margin*0.6, r'Convection ($h$) + Radiation ($\epsilon$)', fontsize=11, color='#d35400', ha='left', fontweight='bold')
     ax.annotate('', xy=(-margin*0.6, Lz/2), xytext=(0, Lz/2), arrowprops=arrow_style)
     ax.annotate('', xy=(Lx + margin*0.6, Lz/2), xytext=(Lx, Lz/2), arrowprops=arrow_style)
     ax.text(Lx/2, Lz/2, 'LiPo Cell Core\n(Anisotropic $k$)', ha='center', va='center', fontsize=16, fontweight='bold', color='#2c3e50')
@@ -1069,42 +1069,49 @@ def create_2d_heatmap_with_mesh(T_2d, extents_xy, style_params,
                                  show_mesh=True, mesh_color='black',
                                  mesh_alpha=0.3, mesh_linewidth=0.5):
     import matplotlib.pyplot as plt
-    from matplotlib.collections import QuadMesh
     cmap_name = style_params.get('cmap', 'hot')
     fig, ax = plt.subplots(figsize=(10, 8))
-    Ny, Nx = T_2d.shape
-    
+
+    # T_2d comes from T_final[:, :, mid_z] so its shape is (Nx, Ny).
+    # Matplotlib expects C with shape (rows, cols) = (Ny, Nx).
+    # Therefore, we transpose T_2d so its shape becomes (Ny, Nx).
+    T_2d_plot = T_2d.T
+    rows, cols = T_2d_plot.shape  # rows = Ny, cols = Nx
+
     # Cell centers
-    x = np.linspace(extents_xy[0], extents_xy[1], Nx)
-    y = np.linspace(extents_xy[2], extents_xy[3], Ny)
-    
-    # Cell edges (required for shading='flat' when C has shape Nx, Ny)
-    dx = (extents_xy[1] - extents_xy[0]) / max(1, Nx - 1)
-    dy = (extents_xy[3] - extents_xy[2]) / max(1, Ny - 1)
-    x_edges = np.linspace(extents_xy[0] - dx/2, extents_xy[1] + dx/2, Nx + 1)
-    y_edges = np.linspace(extents_xy[2] - dy/2, extents_xy[3] + dy/2, Ny + 1)
-    X_edges, Y_edges = np.meshgrid(x_edges, y_edges, indexing='ij')
+    x = np.linspace(extents_xy[0], extents_xy[1], cols)
+    y = np.linspace(extents_xy[2], extents_xy[3], rows)
+
+    # Cell edges (required for shading='flat')
+    dx = (extents_xy[1] - extents_xy[0]) / max(1, cols - 1)
+    dy = (extents_xy[3] - extents_xy[2]) / max(1, rows - 1)
+    x_edges = np.linspace(extents_xy[0] - dx/2, extents_xy[1] + dx/2, cols + 1)
+    y_edges = np.linspace(extents_xy[2] - dy/2, extents_xy[3] + dy/2, rows + 1)
+
+    # indexing='xy' gives X_edges shape (rows+1, cols+1) = (Ny+1, Nx+1)
+    # This perfectly matches matplotlib's requirement for C with shape (rows, cols).
+    X_edges, Y_edges = np.meshgrid(x_edges, y_edges, indexing='xy')
 
     if show_mesh:
         pcm = ax.pcolormesh(
-            X_edges, Y_edges, T_2d, cmap=cmap_name, shading='flat',
+            X_edges, Y_edges, T_2d_plot, cmap=cmap_name, shading='flat',
             edgecolors=mesh_color, linewidth=mesh_linewidth, alpha=1.0 - mesh_alpha
         )
-        node_step_x = max(1, Nx // 10)
-        node_step_y = max(1, Ny // 10)
-        for i in range(0, Nx, node_step_x):
-            for j in range(0, Ny, node_step_y):
+        node_step_x = max(1, cols // 10)
+        node_step_y = max(1, rows // 10)
+        for i in range(0, cols, node_step_x):
+            for j in range(0, rows, node_step_y):
                 ax.plot(x[i], y[j], 'o', color=mesh_color, markersize=3, alpha=mesh_alpha + 0.2)
     else:
-        pcm = ax.pcolormesh(X_edges, Y_edges, T_2d, cmap=cmap_name, shading='flat')
-        
+        pcm = ax.pcolormesh(X_edges, Y_edges, T_2d_plot, cmap=cmap_name, shading='flat')
+
     cbar = plt.colorbar(pcm, ax=ax, label='Temperature (K)', shrink=0.85)
     cbar.ax.tick_params(labelsize=11)
     ax.set_xlabel('X (m)', fontsize=13, fontweight='bold')
     ax.set_ylabel('Y (m)', fontsize=13, fontweight='bold')
-    ax.set_title(f'2D Thermal Field (Mesh: {Nx}×{Ny}) | T: {T_2d.min():.1f} - {T_2d.max():.1f} K', fontsize=14, fontweight='bold')
+    ax.set_title(f'2D Thermal Field (Mesh: {cols}×{rows}) | T: {T_2d.min():.1f} - {T_2d.max():.1f} K', fontsize=14, fontweight='bold')
     ax.set_aspect('equal')
-    textstr = f'Grid: {Nx}×{Ny}\nΔx = {(x[1]-x[0])*1000:.2f} mm\nΔy = {(y[1]-y[0])*1000:.2f} mm'
+    textstr = f'Grid: {cols}×{rows}\nΔx = {(x[1]-x[0])*1000:.2f} mm\nΔy = {(y[1]-y[0])*1000:.2f} mm'
     props = dict(boxstyle='round', facecolor='white', alpha=0.8, edgecolor='gray')
     ax.text(0.02, 0.98, textstr, transform=ax.transAxes, fontsize=10, verticalalignment='top', bbox=props)
     fig = EnhancedFigureStyler.apply_publication_styling(fig, ax, style_params)
@@ -1702,7 +1709,7 @@ if operation_mode == "Run New Simulation":
         'T_amb': T_amb, 'trigger_radius': trigger_radius
     }
     fig_3d = plot_3d_domain_sketch(sketch_params)
-    st.plotly_chart(fig_3d, use_container_width=True)
+    st.plotly_chart(fig_3d, width="stretch")
     
     if 'last_efficiency' in st.session_state:
         st.subheader("⚡ Compute Efficiency Monitor (Last Run)")
@@ -1778,7 +1785,7 @@ if operation_mode == "Run New Simulation":
     sims = SimulationDB.get_simulation_list()
     if sims:
         df = pd.DataFrame([{'ID': s['id'], 'Name': s['name']} for s in sims])
-        st.dataframe(df, use_container_width=True)
+        st.dataframe(df, width="stretch")
         with st.expander("🗑️ Delete Simulations"):
             to_delete = st.multiselect("Select to delete", [s['name'] for s in sims])
             if st.button("Delete Selected"):
@@ -1823,7 +1830,7 @@ if operation_mode == "Run New Simulation":
                     n_slices=n_slices,
                     show_cross_slices=show_cross
                 )
-                st.plotly_chart(fig_ms, use_container_width=True)
+                st.plotly_chart(fig_ms, width="stretch")
 
             with tab2:
                 col1, col2 = st.columns(2)
@@ -1840,7 +1847,7 @@ if operation_mode == "Run New Simulation":
                     slice_axis=slice_axis,
                     slice_position=slice_pos
                 )
-                st.plotly_chart(fig_sw, use_container_width=True)
+                st.plotly_chart(fig_sw, width="stretch")
 
             with tab3:
                 st.markdown("*Smooth isosurface (hides mesh – for reference only)*")
@@ -1872,7 +1879,7 @@ if operation_mode == "Run New Simulation":
                     title=dict(text='🔥 Isosurfaces (Smooth)', x=0.5),
                     height=700
                 )
-                st.plotly_chart(fig_iso, use_container_width=True)
+                st.plotly_chart(fig_iso, width="stretch")
 
             with tab4:
                 st.markdown("**2D mid-Z heatmap with cell edges – shows mesh structure clearly.**")
@@ -1919,7 +1926,7 @@ if operation_mode == "Run New Simulation":
                 fig_smoke = create_smoke_thermal_combined_visualization(
                     T_final, smoke_xyz, ext, advanced_styling, n_thermal_slices=3
                 )
-                st.plotly_chart(fig_smoke, use_container_width=True)
+                st.plotly_chart(fig_smoke, width="stretch")
                 
             with tab6:
                 st.markdown("**Buoyancy-Driven Flow Field (Requires CFD enabled)**")
@@ -1928,11 +1935,11 @@ if operation_mode == "Run New Simulation":
                     U, V, W, P, C = cfd_data
                     skip = st.slider("Vector Density (Skip N)", 1, 10, 3, help="Higher = fewer arrows, faster rendering")
                     fig_vec = create_cfd_velocity_vectors(U, V, W, ext, skip=skip)
-                    st.plotly_chart(fig_vec, use_container_width=True)
+                    st.plotly_chart(fig_vec, width="stretch")
                     
                     st.markdown("**Smoke Concentration Isosurface**")
                     fig_smoke_iso = create_smoke_isosurface(C, ext, advanced_styling)
-                    st.plotly_chart(fig_smoke_iso, use_container_width=True)
+                    st.plotly_chart(fig_smoke_iso, width="stretch")
                 else:
                     st.warning("CFD-Lite was not enabled for this simulation. Run again with 'Enable CFD-Lite' checked to see velocity vectors and smoke isosurfaces.")
                     
@@ -1954,7 +1961,7 @@ if operation_mode == "Run New Simulation":
                     height=500,
                     template='plotly_white'
                 )
-                st.plotly_chart(fig_energy, use_container_width=True)
+                st.plotly_chart(fig_energy, width="stretch")
                 
                 col1, col2, col3 = st.columns(3)
                 col1.metric("Initial Energy", f"{E_hist[0]:.2e} J")
@@ -1990,7 +1997,7 @@ if operation_mode == "Run New Simulation":
                 }],
                 width=800, height=600
             )
-            st.plotly_chart(fig_slider, use_container_width=True)
+            st.plotly_chart(fig_slider, width="stretch")
 
 else:  # Compare Saved Simulations
     st.header("🔬 Multi-Simulation Comparison")
