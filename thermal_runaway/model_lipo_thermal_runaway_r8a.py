@@ -1925,7 +1925,7 @@ if operation_mode == "Run New Simulation":
 
                 current_T = snapshots[time_idx]
                 current_time = times[time_idx]
-                                col_m1, col_m2, col_m3 = st.columns(3)
+                col_m1, col_m2, col_m3 = st.columns(3)
                 col_m1.metric("Current Time", f"{current_time:.2f} s")
                 col_m2.metric("Max Temp", f"{np.max(current_T):.1f} K")
                 col_m3.metric("Min Temp", f"{np.min(current_T):.1f} K")
