@@ -6,7 +6,8 @@
 #   - Mesh-visible 3D visualisation (multi-slice + wireframe)
 #   - 2D pcolormesh with edge colours
 #   - Pre-simulation diagnostics
-#   - All previous advanced features retained
+#   - Fixed Plotly colorbar syntax (titleside → title=dict(...))
+#   - Slices now avoid boundaries (all requested slices are visible)
 # =============================================================================
 
 import streamlit as st
@@ -746,7 +747,7 @@ def plot_3d_domain_sketch(params):
     return fig
 
 # =============================================================================
-# 8.6 NEW: MESH-VISIBLE VISUALIZATION FUNCTIONS
+# 8.6 FIXED: MESH-VISIBLE VISUALIZATION FUNCTIONS
 # =============================================================================
 
 def create_mesh_aware_3d_thermal(T_3d, extents, style_params, 
@@ -754,6 +755,7 @@ def create_mesh_aware_3d_thermal(T_3d, extents, style_params,
                                   slice_axis='z', slice_position=0.5):
     """
     Create a 3D thermal visualization that SHOWS THE MESH GRID using a single slice with wireframe overlay.
+    FIXED: Corrected colorbar title syntax for newer Plotly versions.
     """
     Nx, Ny, Nz = T_3d.shape
     ext_x = extents['x']; ext_y = extents['y']; ext_z = extents['z']
@@ -766,16 +768,19 @@ def create_mesh_aware_3d_thermal(T_3d, extents, style_params,
     # Select slice
     if slice_axis == 'z':
         slice_idx = int(Nz * slice_position)
+        slice_idx = max(0, min(Nz-1, slice_idx))  # Clamp to valid range
         X, Y = np.meshgrid(x, y, indexing='ij')
         Z_data = T_3d[:, :, slice_idx]
         Z_pos = np.full_like(X, z[slice_idx])
     elif slice_axis == 'y':
         slice_idx = int(Ny * slice_position)
+        slice_idx = max(0, min(Ny-1, slice_idx))
         X, Z = np.meshgrid(x, z, indexing='ij')
         Y_data = T_3d[:, slice_idx, :]
         Y_pos = np.full_like(X, y[slice_idx])
     else:  # x
         slice_idx = int(Nx * slice_position)
+        slice_idx = max(0, min(Nx-1, slice_idx))
         Y, Z = np.meshgrid(y, z, indexing='ij')
         X_data = T_3d[slice_idx, :, :]
         X_pos = np.full_like(Y, x[slice_idx])
@@ -788,13 +793,23 @@ def create_mesh_aware_3d_thermal(T_3d, extents, style_params,
     fig = go.Figure()
     
     # ---- Surface colored by temperature ----
+    # ✅ FIXED: Correct colorbar title syntax
+    colorbar_config = dict(
+        title=dict(
+            text='Temperature (K)', 
+            side='right',  # This goes INSIDE the title dict now
+            font=dict(size=14)
+        ),
+        thickness=15,
+        len=0.8
+    )
+    
     if slice_axis == 'z':
         fig.add_trace(go.Surface(
             x=X, y=Y, z=Z_pos,
             surfacecolor=Z_data,
             colorscale=pl_colorscale,
-            colorbar=dict(title='Temperature (K)', titleside='right',
-                         titlefont=dict(size=14)),
+            colorbar=colorbar_config,  # ✅ FIXED
             showscale=True,
             opacity=0.9,
             flatshading=False,
@@ -803,7 +818,6 @@ def create_mesh_aware_3d_thermal(T_3d, extents, style_params,
         
         # ---- ADD MESH WIREFRAME OVERLAY ----
         if show_mesh:
-            # Mesh lines along X direction (vertical lines in Y)
             step_x = max(1, Nx // 15)
             step_y = max(1, Ny // 15)
             for i in range(0, Nx, step_x):
@@ -817,7 +831,6 @@ def create_mesh_aware_3d_thermal(T_3d, extents, style_params,
                     showlegend=False,
                     hoverinfo='skip'
                 ))
-            # Mesh lines along Y direction
             for j in range(0, Ny, step_y):
                 fig.add_trace(go.Scatter3d(
                     x=[ext_x[0], ext_x[1]],
@@ -834,6 +847,7 @@ def create_mesh_aware_3d_thermal(T_3d, extents, style_params,
             x=X, y=Y_pos, z=Z,
             surfacecolor=Y_data,
             colorscale=pl_colorscale,
+            colorbar=colorbar_config,  # ✅ FIXED
             showscale=True,
             opacity=0.9
         ))
@@ -842,21 +856,32 @@ def create_mesh_aware_3d_thermal(T_3d, extents, style_params,
             step_z = max(1, Nz // 15)
             for i in range(0, Nx, step_x):
                 fig.add_trace(go.Scatter3d(
-                    x=[x[i], x[i]], y=[y[slice_idx], y[slice_idx]], z=[ext_z[0], ext_z[1]],
-                    mode='lines', line=dict(color='gray', width=1),
-                    opacity=mesh_opacity, showlegend=False, hoverinfo='skip'
+                    x=[x[i], x[i]], 
+                    y=[y[slice_idx], y[slice_idx]], 
+                    z=[ext_z[0], ext_z[1]],
+                    mode='lines', 
+                    line=dict(color='gray', width=1),
+                    opacity=mesh_opacity, 
+                    showlegend=False, 
+                    hoverinfo='skip'
                 ))
             for k in range(0, Nz, step_z):
                 fig.add_trace(go.Scatter3d(
-                    x=[ext_x[0], ext_x[1]], y=[y[slice_idx], y[slice_idx]], z=[z[k], z[k]],
-                    mode='lines', line=dict(color='gray', width=1),
-                    opacity=mesh_opacity, showlegend=False, hoverinfo='skip'
+                    x=[ext_x[0], ext_x[1]], 
+                    y=[y[slice_idx], y[slice_idx]], 
+                    z=[z[k], z[k]],
+                    mode='lines', 
+                    line=dict(color='gray', width=1),
+                    opacity=mesh_opacity, 
+                    showlegend=False, 
+                    hoverinfo='skip'
                 ))
     else:  # x
         fig.add_trace(go.Surface(
             x=X_pos, y=Y, z=Z,
             surfacecolor=X_data,
             colorscale=pl_colorscale,
+            colorbar=colorbar_config,  # ✅ FIXED
             showscale=True,
             opacity=0.9
         ))
@@ -865,19 +890,29 @@ def create_mesh_aware_3d_thermal(T_3d, extents, style_params,
             step_z = max(1, Nz // 15)
             for j in range(0, Ny, step_y):
                 fig.add_trace(go.Scatter3d(
-                    x=[x[slice_idx], x[slice_idx]], y=[y[j], y[j]], z=[ext_z[0], ext_z[1]],
-                    mode='lines', line=dict(color='gray', width=1),
-                    opacity=mesh_opacity, showlegend=False, hoverinfo='skip'
+                    x=[x[slice_idx], x[slice_idx]], 
+                    y=[y[j], y[j]], 
+                    z=[ext_z[0], ext_z[1]],
+                    mode='lines', 
+                    line=dict(color='gray', width=1),
+                    opacity=mesh_opacity, 
+                    showlegend=False, 
+                    hoverinfo='skip'
                 ))
             for k in range(0, Nz, step_z):
                 fig.add_trace(go.Scatter3d(
-                    x=[x[slice_idx], x[slice_idx]], y=[ext_y[0], ext_y[1]], z=[z[k], z[k]],
-                    mode='lines', line=dict(color='gray', width=1),
-                    opacity=mesh_opacity, showlegend=False, hoverinfo='skip'
+                    x=[x[slice_idx], x[slice_idx]], 
+                    y=[ext_y[0], ext_y[1]], 
+                    z=[z[k], z[k]],
+                    mode='lines', 
+                    line=dict(color='gray', width=1),
+                    opacity=mesh_opacity, 
+                    showlegend=False, 
+                    hoverinfo='skip'
                 ))
     
     # Domain boundary box
-    margin = max(ext_x[1]-ext_x[0], ext_y[1]-ext_y[0], ext_z[1]-ext_z[0]) * 0.05
+    margin = max(ext_x[1]-ext_x[0], ext_y[1]-ext_y[0], ext_z[1]-ext_z[0]) * 0.1
     fig.add_trace(go.Scatter3d(
         x=[ext_x[0], ext_x[1], ext_x[1], ext_x[0], ext_x[0],
            ext_x[0], ext_x[1], ext_x[1], ext_x[0], ext_x[0],
@@ -888,8 +923,10 @@ def create_mesh_aware_3d_thermal(T_3d, extents, style_params,
         z=[ext_z[0], ext_z[0], ext_z[0], ext_z[0], ext_z[0],
            ext_z[1], ext_z[1], ext_z[1], ext_z[1], ext_z[1],
            ext_z[1], ext_z[1], ext_z[0], ext_z[0], ext_z[0], ext_z[1]],
-        mode='lines', line=dict(color='#2c3e50', width=3),
-        name='Domain Boundary', hoverinfo='skip'
+        mode='lines', 
+        line=dict(color='#2c3e50', width=3),
+        name='Domain Boundary', 
+        hoverinfo='skip'
     ))
     
     T_min = np.min(T_3d); T_max = np.max(T_3d)
@@ -903,7 +940,8 @@ def create_mesh_aware_3d_thermal(T_3d, extents, style_params,
         ),
         title=dict(
             text=f'🔥 3D Thermal Field with Mesh | T: {T_min:.1f} - {T_max:.1f} K',
-            x=0.5, font=dict(size=18)
+            x=0.5, 
+            font=dict(size=18)
         ),
         height=700,
         margin=dict(l=0, r=0, b=0, t=50),
@@ -915,7 +953,10 @@ def create_mesh_aware_3d_thermal(T_3d, extents, style_params,
 def create_multi_slice_3d_visualization(T_3d, extents, style_params, n_slices=5):
     """
     Create a 3D visualization with multiple slices showing the full domain.
-    This makes the mesh/grid structure very visible.
+    FIXED: 
+      1. Correct colorbar syntax
+      2. Slices now avoid boundaries to be fully visible
+      3. All requested slices are rendered
     """
     Nx, Ny, Nz = T_3d.shape
     ext_x = extents['x']; ext_y = extents['y']; ext_z = extents['z']
@@ -926,37 +967,76 @@ def create_multi_slice_3d_visualization(T_3d, extents, style_params, n_slices=5)
     cmap_name = style_params.get('cmap', 'hot')
     pl_colorscale = matplotlib_to_plotly(cmap_name, pl_entries=20)
     
+    # ✅ FIXED: Generate slices that AVOID boundaries (so all are visible)
+    # Instead of 0 to Nz-1, use 1 to Nz-2 to avoid edge hiding
+    if Nz > 2:
+        z_slices = np.linspace(1, Nz-2, n_slices, dtype=int)
+    else:
+        z_slices = np.array([Nz//2])
+    
+    # Ensure unique slices
+    z_slices = np.unique(z_slices)
+    n_actual_slices = len(z_slices)
+    
     fig = go.Figure()
     
+    # ✅ FIXED: Colorbar configuration with correct syntax
+    colorbar_config = dict(
+        title=dict(
+            text='Temperature (K)',
+            side='right',
+            font=dict(size=14)
+        ),
+        thickness=15,
+        len=0.8
+    )
+    
     # Z-direction slices (horizontal cross-sections)
-    z_slices = np.linspace(0, Nz-1, n_slices, dtype=int)
     for idx, kz in enumerate(z_slices):
         X, Y = np.meshgrid(x, y, indexing='ij')
         Z_pos = np.full_like(X, z[kz])
         T_slice = T_3d[:, :, kz]
-        opacity = 0.6 + 0.3 * (kz / (Nz-1))
+        
+        # Opacity varies by depth (back slices more transparent)
+        opacity = 0.5 + 0.4 * (kz / max(Nz-1, 1))
+        
+        # Only show colorbar on the LAST slice
+        is_last = (idx == n_actual_slices - 1)
+        
         fig.add_trace(go.Surface(
             x=X, y=Y, z=Z_pos,
             surfacecolor=T_slice,
             colorscale=pl_colorscale,
-            showscale=(idx == len(z_slices)-1),
+            showscale=is_last,
+            colorbar=colorbar_config if is_last else None,  # ✅ FIXED
             opacity=opacity,
             name=f'Z = {z[kz]*1000:.1f} mm'
         ))
-        # Add mesh lines on each slice
-        step_x = max(1, Nx // 12)
-        step_y = max(1, Ny // 12)
+        
+        # Add mesh lines on each Z-slice
+        step_x = max(1, Nx // 10)
+        step_y = max(1, Ny // 10)
         for i in range(0, Nx, step_x):
             fig.add_trace(go.Scatter3d(
-                x=[x[i], x[i]], y=[ext_y[0], ext_y[1]], z=[z[kz], z[kz]],
-                mode='lines', line=dict(color='black', width=0.8),
-                opacity=0.4, showlegend=False, hoverinfo='skip'
+                x=[x[i], x[i]], 
+                y=[ext_y[0], ext_y[1]], 
+                z=[z[kz], z[kz]],
+                mode='lines', 
+                line=dict(color='black', width=0.6),
+                opacity=0.35, 
+                showlegend=False, 
+                hoverinfo='skip'
             ))
         for j in range(0, Ny, step_y):
             fig.add_trace(go.Scatter3d(
-                x=[ext_x[0], ext_x[1]], y=[y[j], y[j]], z=[z[kz], z[kz]],
-                mode='lines', line=dict(color='black', width=0.8),
-                opacity=0.4, showlegend=False, hoverinfo='skip'
+                x=[ext_x[0], ext_x[1]], 
+                y=[y[j], y[j]], 
+                z=[z[kz], z[kz]],
+                mode='lines', 
+                line=dict(color='black', width=0.6),
+                opacity=0.35, 
+                showlegend=False, 
+                hoverinfo='skip'
             ))
     
     # Y-direction slice (vertical through center)
@@ -969,9 +1049,25 @@ def create_multi_slice_3d_visualization(T_3d, extents, style_params, n_slices=5)
         surfacecolor=T_slice,
         colorscale=pl_colorscale,
         showscale=False,
-        opacity=0.7,
-        name=f'Y = {y[ky]*1000:.1f} mm (center)'
+        opacity=0.6,
+        name=f'Y-center slice'
     ))
+    # Add mesh on Y-slice
+    step_x = max(1, Nx // 10)
+    step_z = max(1, Nz // 8)
+    for i in range(0, Nx, step_x):
+        fig.add_trace(go.Scatter3d(
+            x=[x[i], x[i]], y=[y[ky], y[ky]], z=[ext_z[0], ext_z[1]],
+            mode='lines', line=dict(color='darkblue', width=0.5),
+            opacity=0.3, showlegend=False, hoverinfo='skip'
+        ))
+    for k in range(0, Nz, step_z):
+        fig.add_trace(go.Scatter3d(
+            x=[ext_x[0], ext_x[1]], y=[y[ky], y[ky]], z=[z[k], z[k]],
+            mode='lines', line=dict(color='darkblue', width=0.5),
+            opacity=0.3, showlegend=False, hoverinfo='skip'
+        ))
+    
     # X-direction slice (vertical through center)
     kx = Nx // 2
     Y, Z = np.meshgrid(y, z, indexing='ij')
@@ -982,11 +1078,25 @@ def create_multi_slice_3d_visualization(T_3d, extents, style_params, n_slices=5)
         surfacecolor=T_slice,
         colorscale=pl_colorscale,
         showscale=False,
-        opacity=0.7,
-        name=f'X = {x[kx]*1000:.1f} mm (center)'
+        opacity=0.6,
+        name=f'X-center slice'
     ))
+    # Add mesh on X-slice
+    step_y = max(1, Ny // 10)
+    for j in range(0, Ny, step_y):
+        fig.add_trace(go.Scatter3d(
+            x=[x[kx], x[kx]], y=[y[j], y[j]], z=[ext_z[0], ext_z[1]],
+            mode='lines', line=dict(color='darkgreen', width=0.5),
+            opacity=0.3, showlegend=False, hoverinfo='skip'
+        ))
+    for k in range(0, Nz, step_z):
+        fig.add_trace(go.Scatter3d(
+            x=[x[kx], x[kx]], y=[ext_y[0], ext_y[1]], z=[z[k], z[k]],
+            mode='lines', line=dict(color='darkgreen', width=0.5),
+            opacity=0.3, showlegend=False, hoverinfo='skip'
+        ))
     
-    # Add domain boundary box
+    # Domain boundary box
     box_lines = [
         ([ext_x[0], ext_x[1]], [ext_y[0], ext_y[0]], [ext_z[0], ext_z[0]]),
         ([ext_x[0], ext_x[1]], [ext_y[1], ext_y[1]], [ext_z[0], ext_z[0]]),
@@ -1004,9 +1114,23 @@ def create_multi_slice_3d_visualization(T_3d, extents, style_params, n_slices=5)
     for bx, by, bz in box_lines:
         fig.add_trace(go.Scatter3d(
             x=bx, y=by, z=bz,
-            mode='lines', line=dict(color='#2c3e50', width=3),
-            showlegend=False, hoverinfo='skip'
+            mode='lines', 
+            line=dict(color='#2c3e50', width=3),
+            showlegend=False, 
+            hoverinfo='skip'
         ))
+    
+    # Corner nodes
+    corners_x = [ext_x[0], ext_x[1], ext_x[0], ext_x[1], ext_x[0], ext_x[1], ext_x[0], ext_x[1]]
+    corners_y = [ext_y[0], ext_y[0], ext_y[1], ext_y[1], ext_y[0], ext_y[0], ext_y[1], ext_y[1]]
+    corners_z = [ext_z[0], ext_z[0], ext_z[0], ext_z[0], ext_z[1], ext_z[1], ext_z[1], ext_z[1]]
+    fig.add_trace(go.Scatter3d(
+        x=corners_x, y=corners_y, z=corners_z,
+        mode='markers',
+        marker=dict(size=5, color='#2c3e50', symbol='diamond'),
+        name='Mesh Nodes',
+        showlegend=True
+    ))
     
     T_min = np.min(T_3d); T_max = np.max(T_3d)
     fig.update_layout(
@@ -1017,8 +1141,9 @@ def create_multi_slice_3d_visualization(T_3d, extents, style_params, n_slices=5)
             aspectmode='data'
         ),
         title=dict(
-            text=f'🔥 Multi-Slice 3D Thermal Field | T: {T_min:.1f} - {T_max:.1f} K | Mesh: {Nx}×{Ny}×{Nz}',
-            x=0.5, font=dict(size=16)
+            text=f'🔥 Multi-Slice 3D Thermal Field | T: {T_min:.1f} - {T_max:.1f} K | Mesh: {Nx}×{Ny}×{Nz} | {n_actual_slices} Z-slices',
+            x=0.5, 
+            font=dict(size=16)
         ),
         height=750,
         margin=dict(l=0, r=0, b=0, t=50)
