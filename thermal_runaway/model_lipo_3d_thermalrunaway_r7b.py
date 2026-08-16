@@ -1979,7 +1979,7 @@ if operation_mode == "Run New Simulation":
                             key='time_slider_ms'
                         )
                     with col2:
-                        n_slices = st.slider("Z‑slices", 1, min(1000, snapshots[0].shape[2]), 5, key='n_slices_ms')
+                        n_slices = st.slider("Z‑slices", 1, min(20, snapshots[0].shape[2]), 5, key='n_slices_ms')
                     with col3:
                         show_cross = st.checkbox("Show X/Y cross‑slices", value=False, key='show_cross_ms')
 
