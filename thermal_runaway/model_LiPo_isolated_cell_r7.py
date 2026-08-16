@@ -9,8 +9,10 @@
 #   - Fixed Plotly colorbar syntax (titleside → title=dict(...))
 #   - Slices now avoid boundaries (all requested slices are visible)
 #   - Cross-slices are optional and less intrusive
-#   - Removed invalid flatshading for go.Surface
+#   - Removed invalid flatshading for go.Surface and go.Mesh3d
 #   - Z-slice slider range dynamically adapts to mesh
+#   - Fixed pcolormesh shading to 'auto' (fixes dimension mismatch)
+#   - Updated Plotly chart width to 'stretch' (replaces deprecated use_container_width)
 # =============================================================================
 
 import streamlit as st
@@ -586,7 +588,7 @@ def step_3d(T, alphas, dt,
     return T_new, alphas_new
 
 # -----------------------------------------------------------------------------
-# 8.5 Domain Sketch Functions (2D & 3D) - unchanged
+# 8.5 Domain Sketch Functions (2D & 3D)
 # -----------------------------------------------------------------------------
 def plot_initial_domain_sketch(params):
     """Generate a 2D X-Z cross-section sketch of the initial thermal domain."""
@@ -714,7 +716,8 @@ def plot_3d_domain_sketch(params):
         z=[0, 0, 0, 0, Lz, Lz, Lz, Lz],
         i=[0,0,4,4,2,2,5,5,1,1,3,3], j=[1,2,5,6,3,0,1,4,5,4,7,6],
         k=[2,3,6,7,0,1,4,0,4,5,6,2],
-        color='#3498db', opacity=0.15, flatshading=True,
+        color='#3498db', opacity=0.15,
+        # flatshading=True,   # <-- REMOVED (invalid in newer plotly)
         name='Cell Core', showscale=False))
     fig.add_trace(go.Surface(  # hotspot
         x=x_s, y=y_s, z=z_s,
@@ -1164,6 +1167,7 @@ def create_2d_heatmap_with_mesh(T_2d, extents_xy, style_params,
                                  mesh_alpha=0.3, mesh_linewidth=0.5):
     """
     Create a 2D heatmap that CLEARLY SHOWS THE MESH GRID using pcolormesh with edgecolors.
+    FIXED: shading='auto' to handle vertex-level data correctly.
     """
     import matplotlib.pyplot as plt
     from matplotlib.collections import QuadMesh
@@ -1178,10 +1182,11 @@ def create_2d_heatmap_with_mesh(T_2d, extents_xy, style_params,
     X, Y = np.meshgrid(x, y, indexing='ij')
     
     if show_mesh:
+        # Use shading='auto' to automatically handle the vertex data shape
         pcm = ax.pcolormesh(
             X, Y, T_2d,
             cmap=cmap_name,
-            shading='flat',
+            shading='auto',          # <-- FIX: 'auto' works with vertex-level data
             edgecolors=mesh_color,
             linewidth=mesh_linewidth,
             alpha=1.0 - mesh_alpha
@@ -1703,7 +1708,7 @@ if operation_mode == "Run New Simulation":
         'T_amb': T_amb, 'trigger_radius': trigger_radius
     }
     fig_3d = plot_3d_domain_sketch(sketch_params)
-    st.plotly_chart(fig_3d, use_container_width=True)
+    st.plotly_chart(fig_3d, width='stretch')  # updated width
     
     # --- EFFICIENCY MONITOR ---
     if 'last_efficiency' in st.session_state:
@@ -1824,7 +1829,7 @@ if operation_mode == "Run New Simulation":
                     n_slices=n_slices,
                     show_cross_slices=show_cross
                 )
-                st.plotly_chart(fig_ms, use_container_width=True)
+                st.plotly_chart(fig_ms, width='stretch')
 
             with tab2:
                 col1, col2 = st.columns(2)
@@ -1841,7 +1846,7 @@ if operation_mode == "Run New Simulation":
                     slice_axis=slice_axis,
                     slice_position=slice_pos
                 )
-                st.plotly_chart(fig_sw, use_container_width=True)
+                st.plotly_chart(fig_sw, width='stretch')
 
             with tab3:
                 st.markdown("*Smooth isosurface (hides mesh – for reference only)*")
@@ -1874,7 +1879,7 @@ if operation_mode == "Run New Simulation":
                     title=dict(text='🔥 Isosurfaces (Smooth)', x=0.5),
                     height=700
                 )
-                st.plotly_chart(fig_iso, use_container_width=True)
+                st.plotly_chart(fig_iso, width='stretch')
 
             with tab4:
                 st.markdown("**2D mid‑Z heatmap with cell edges – shows mesh structure clearly.**")
@@ -1923,7 +1928,7 @@ if operation_mode == "Run New Simulation":
                 }],
                 width=800, height=600
             )
-            st.plotly_chart(fig_slider, use_container_width=True)
+            st.plotly_chart(fig_slider, width='stretch')
 
 else:  # Compare Saved Simulations
     st.header("🔬 Multi‑Simulation Comparison")
