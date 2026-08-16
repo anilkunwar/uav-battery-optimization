@@ -687,11 +687,11 @@ def plot_initial_domain_sketch(params):
     
     # Top convection/radiation
     ax.annotate('', xy=(Lx/2, Lz + margin*0.6), xytext=(Lx/2, Lz), arrowprops=arrow_style)
-    ax.text(Lx/2 + 0.002, Lz + margin*0.6, 'Convection ($h$) + Radiation ($\epsilon$)', fontsize=11, color='#d35400', ha='left', fontweight='bold')
+    ax.text(Lx/2 + 0.002, Lz + margin*0.6, 'Convection ($h$) + Radiation ($\\epsilon$)', fontsize=11, color='#d35400', ha='left', fontweight='bold')
     
     # Bottom
     ax.annotate('', xy=(Lx/2, -margin*0.6), xytext=(Lx/2, 0), arrowprops=arrow_style)
-    ax.text(Lx/2 + 0.002, -margin*0.6, 'Convection ($h$) + Radiation ($\epsilon$)', fontsize=11, color='#d35400', ha='left', fontweight='bold')
+    ax.text(Lx/2 + 0.002, -margin*0.6, 'Convection ($h$) + Radiation ($\\epsilon$)', fontsize=11, color='#d35400', ha='left', fontweight='bold')
     
     # Left & Right
     ax.annotate('', xy=(-margin*0.6, Lz/2), xytext=(0, Lz/2), arrowprops=arrow_style)
@@ -1015,7 +1015,6 @@ def create_mesh_aware_3d_thermal(T_3d, extents, style_params,
     bg_color = style_params.get('figure_facecolor', '#FFFFFF')
 
     axis_template = dict(
-        title=dict(font=dict(size=label_size, color=title_color), standoff=10),
         tickfont=dict(size=tick_size, color=title_color),
         gridcolor=spine_color if style_params.get('show_grid', True) else 'rgba(0,0,0,0)',
         gridwidth=style_params.get('grid_width', 0.5),
@@ -1023,11 +1022,17 @@ def create_mesh_aware_3d_thermal(T_3d, extents, style_params,
         showline=True, linewidth=spine_width, linecolor=spine_color, zeroline=False
     )
 
+    def make_axis(template, title_text, rng):
+        d = template.copy()
+        d['title'] = dict(text=title_text, font=dict(size=label_size, color=title_color), standoff=10)
+        d['range'] = rng
+        return d
+
     fig.update_layout(
         scene=dict(
-            xaxis=dict(**axis_template, title='X (m)', range=[ext_x[0]-margin, ext_x[1]+margin]),
-            yaxis=dict(**axis_template, title='Y (m)', range=[ext_y[0]-margin, ext_y[1]+margin]),
-            zaxis=dict(**axis_template, title='Z (m)', range=[ext_z[0]-margin, ext_z[1]+margin]),
+            xaxis=make_axis(axis_template, 'X (m)', [ext_x[0]-margin, ext_x[1]+margin]),
+            yaxis=make_axis(axis_template, 'Y (m)', [ext_y[0]-margin, ext_y[1]+margin]),
+            zaxis=make_axis(axis_template, 'Z (m)', [ext_z[0]-margin, ext_z[1]+margin]),
             aspectmode='data',
             camera=dict(eye=dict(x=1.5, y=1.5, z=0.8)),
             bgcolor=bg_color
@@ -1232,7 +1237,6 @@ def create_multi_slice_3d_visualization(T_3d, extents, style_params,
     bg_color = style_params.get('figure_facecolor', '#FFFFFF')
 
     axis_template = dict(
-        title=dict(font=dict(size=label_size, color=title_color), standoff=10),
         tickfont=dict(size=tick_size, color=title_color),
         gridcolor=spine_color if style_params.get('show_grid', True) else 'rgba(0,0,0,0)',
         gridwidth=style_params.get('grid_width', 0.5),
@@ -1240,11 +1244,17 @@ def create_multi_slice_3d_visualization(T_3d, extents, style_params,
         showline=True, linewidth=spine_width, linecolor=spine_color, zeroline=False
     )
 
+    def make_axis(template, title_text, rng):
+        d = template.copy()
+        d['title'] = dict(text=title_text, font=dict(size=label_size, color=title_color), standoff=10)
+        d['range'] = rng
+        return d
+
     fig.update_layout(
         scene=dict(
-            xaxis=dict(**axis_template, title='X (m)', range=[ext_x[0]-margin, ext_x[1]+margin]),
-            yaxis=dict(**axis_template, title='Y (m)', range=[ext_y[0]-margin, ext_y[1]+margin]),
-            zaxis=dict(**axis_template, title='Z (m)', range=[ext_z[0]-margin, ext_z[1]+margin]),
+            xaxis=make_axis(axis_template, 'X (m)', [ext_x[0]-margin, ext_x[1]+margin]),
+            yaxis=make_axis(axis_template, 'Y (m)', [ext_y[0]-margin, ext_y[1]+margin]),
+            zaxis=make_axis(axis_template, 'Z (m)', [ext_z[0]-margin, ext_z[1]+margin]),
             aspectmode='data',
             camera=dict(eye=dict(x=1.5, y=1.5, z=0.8)),
             bgcolor=bg_color
