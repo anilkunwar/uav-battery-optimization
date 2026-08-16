@@ -1738,7 +1738,7 @@ if operation_mode == "Run New Simulation":
         
     with st.sidebar.expander("Heat & Trigger", expanded=True):
         q_normal = st.number_input("Normal Heat (W/m³)", 0.0, 5e5, 5e4, 1e4, format="%.0f")
-        trigger_temp = st.number_input("Hotspot T (K)", 350, 600, int(st.session_state.get('trig_val', 450)), 5,
+        trigger_temp = st.number_input("Hotspot T (K)", 350, 1500, int(st.session_state.get('trig_val', 850)), 5,
                                        help="Set to 420-500 K for realistic runaway. 450 K is typical.", key="trig_in")
         trigger_radius = st.slider("Hotspot radius (cells)", 1, 10, 3)
         
