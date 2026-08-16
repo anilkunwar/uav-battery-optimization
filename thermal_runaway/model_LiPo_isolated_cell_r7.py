@@ -1807,7 +1807,7 @@ if operation_mode == "Run New Simulation":
 
             with tab1:
                 st.markdown("**Multiple cross‑sections clearly show the computational mesh.**")
-                n_slices = st.slider("Number of Z-slices", 2, 1000, 500, key='n_slices')
+                n_slices = st.slider("Number of Z-slices", 2, 10000, 5000, key='n_slices')
                 fig_ms = create_multi_slice_3d_visualization(T_final, ext, advanced_styling, n_slices=n_slices)
                 st.plotly_chart(fig_ms, use_container_width=True)
 
