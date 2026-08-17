@@ -1,19 +1,16 @@
 # =============================================================================
 # Streamlit App: FPV LiPo 3D Thermal Runaway Multi‑Simulation Platform
-# UPGRADED VERSION 3.0 – Physics‑Corrected & Literature‑Validated
+# UPGRADED VERSION 3.1 – OOM Fixes & Numerical Robustness
 # =============================================================================
-# Fixes (v3.0):
-#   - α initialized to 0 (unreacted) with seeding for autocatalytic reaction
-#   - Enthalpy (H) scaled ×1000 to achieve realistic T rise (700‑900 K)
-#   - Boundary heater (q_heater) for lateral overheating (paper’s TE)
-#   - Heater turns off at user‑defined cutoff T to allow chemical runaway
-#   - Default h_conv lowered to 5 W/m²·K (near‑adiabatic)
-#   - Default hotspot trigger set to 0 (disabled)
-# =============================================================================
-# *NEW* in this version:
-#   - Central hotspot is re‑enabled by default (450 K) with symmetry
-#   - Kinetics corrected: alpha is conversion, reactions consume remaining material
-#   - Boundary heater turned off by default
+# Fixes (v3.1):
+#   - Conservative fuel consumption (dalpha capped by remaining fuel)
+#   - Heat generation capped to prevent temperature overshoot (T_cap)
+#   - NaN/infinite safety checks
+#   - Early exit when fuel is exhausted (fuel_left < 2%)
+#   - Adaptive dt only while chemistry is active
+#   - UI throttling by wall time (not step count)
+#   - Snapshots stored as float32 to reduce memory
+#   - Added max_steps and wall_time limits
 # =============================================================================
 
 import streamlit as st
@@ -377,7 +374,7 @@ class EnhancedFigureStyler(FigureStyler):
         return fig
 
 # -----------------------------------------------------------------------------
-# 6. Simulation Database (updated to store snapshots) – unchanged
+# 6. Simulation Database (unchanged)
 # -----------------------------------------------------------------------------
 class SimulationDB:
     @staticmethod
@@ -392,8 +389,6 @@ class SimulationDB:
         if 'thermal_simulations' not in st.session_state:
             st.session_state.thermal_simulations = {}
         sim_id = SimulationDB.generate_id(sim_params)
-        if snapshots_3d is not None and len(snapshots_3d) > 0:
-            pass
         st.session_state.thermal_simulations[sim_id] = {
             'id': sim_id,
             'params': sim_params,
@@ -522,7 +517,7 @@ class ThermalLineProfiler3D:
             return dist, profile, endpoints
 
 # -----------------------------------------------------------------------------
-# 7.5 Initial Condition Helpers – FIXED (α starts at 0, seeded, enthalpy scaled)
+# 7.5 Initial Condition Helpers (unchanged)
 # -----------------------------------------------------------------------------
 R_GAS = 8.314  # J/(mol·K)
 
@@ -595,13 +590,13 @@ def initialize_reaction_degrees(Nx, Ny, Nz, trigger_radius, trigger_center=None)
     return alphas
 
 # -----------------------------------------------------------------------------
-# 8. Numba Kernel – UPDATED with boundary heater and FIXED kinetics
+# 8. Numba Kernel – UPDATED with T_cap and conservative fuel consumption
 # -----------------------------------------------------------------------------
 @njit(parallel=True, fastmath=True, cache=True)
 def step_3d(T, alphas, dt,
             rho, Cp, kx, ky, kz, dx, dy, dz,
             q_normal, reaction_params, T_amb, h_conv, eps, sigma, R,
-            q_heater, heater_active):
+            q_heater, heater_active, T_cap):
     Nx, Ny, Nz = T.shape
     T_new = T.copy()
     alphas_new = alphas.copy()
@@ -630,12 +625,15 @@ def step_3d(T, alphas, dt,
                         
                     rate = A * np.exp(-Ea / (R * max(T_ijk, 1.0)))
                     q_abuse += H * rate * f_alpha
-                    dalpha = rate * f_alpha * dt
-                    
-                    # Cap conversion at 1.0 to prevent negative (endothermic) heat generation
-                    alphas_new[r,i,j,k] = min(alpha + dalpha, 1.0)
+                    # CONSERVATIVE: never consume more fuel than remains
+                    dalpha = min(rate * f_alpha * dt, 1.0 - alpha)
+                    alphas_new[r,i,j,k] = alpha + dalpha
                 
                 q_total = q_normal + q_abuse
+                # CAP: explicit update can never jump above T_cap (prevents inf/NaN)
+                q_cap = rho * Cp * max(0.0, (T_cap - T_ijk)) / dt
+                if q_total > q_cap:
+                    q_total = q_cap
                 T_new[i,j,k] = T_ijk + dt/(rho*Cp) * (
                     kx*d2Tdx2 + ky*d2Tdy2 + kz*d2Tdz2 + q_total
                 )
@@ -685,7 +683,7 @@ def step_3d(T, alphas, dt,
     return T_new, alphas_new
 
 # -----------------------------------------------------------------------------
-# 8.5 Domain Sketch Functions – unchanged (but trigger visualization will show if >0)
+# 8.5 Domain Sketch Functions (unchanged)
 # -----------------------------------------------------------------------------
 def plot_initial_domain_sketch(params):
     """Generate a 2D X-Z cross-section sketch of the initial thermal domain."""
@@ -851,7 +849,7 @@ def plot_3d_domain_sketch(params):
     return fig
 
 # -----------------------------------------------------------------------------
-# 8.6 Visualization Functions – unchanged (but now can handle new physics)
+# 8.6 Visualization Functions (unchanged)
 # -----------------------------------------------------------------------------
 def create_mesh_aware_3d_thermal(T_3d, extents, style_params, 
                                   show_mesh=True, mesh_opacity=0.3,
@@ -1287,7 +1285,7 @@ def create_2d_heatmap_with_mesh(T_2d, extents_xy, style_params,
     return fig
 
 # -----------------------------------------------------------------------------
-# 9. Simulation Runner – UPDATED with heater and new physics
+# 9. Simulation Runner – UPDATED with OOM fixes
 # -----------------------------------------------------------------------------
 def run_simulation(params, progress_callback=None):
     tracemalloc.start()
@@ -1324,8 +1322,10 @@ def run_simulation(params, progress_callback=None):
     cfl_factor = params.get('cfl_factor', 0.4)
     adapt_dt_thresh = params.get('adapt_dt_thresh', 600.0)
     adapt_dt_factor = params.get('adapt_dt_factor', 0.8)
-    ui_throttle = params.get('ui_throttle', 200)
     safe_T_limit = params.get('safe_T_limit', 1500.0)
+    T_cap = params.get('T_cap', 1200.0)          # new cap to prevent overshoot
+    max_steps = params.get('max_steps', 2_000_000)
+    wall_limit_s = params.get('wall_limit_s', 300.0)
 
     dx = Lx / (Nx - 1); dy = Ly / (Ny - 1); dz = Lz / (Nz - 1)
     extents = {'x': (0, Lx), 'y': (0, Ly), 'z': (0, Lz)}
@@ -1358,25 +1358,34 @@ def run_simulation(params, progress_callback=None):
     snapshots_3d = []
     snapshot_times = []
     next_snapshot_time = 0.0
+    last_ui = time.time()
 
     while t < sim_time:
-        # Adaptive dt
-        if np.max(T) > adapt_dt_thresh:
+        T_max = np.max(T)
+        # NaN / runaway guard (NaN comparisons are False, so check explicitly)
+        if not np.isfinite(T_max) or T_max > safe_T_limit:
+            break
+
+        # KEY FIX: when fuel is exhausted there is nothing left to resolve stiffly
+        fuel_left = 1.0 - np.mean(alphas)   # mean over all reactions and cells
+        if fuel_left < 0.02:
+            break
+
+        # Adaptive dt: shrink only while hot AND chemistry still active
+        if T_max > adapt_dt_thresh and fuel_left > 0.02:
             dt = max(dt_min, dt * adapt_dt_factor)
         else:
             dt = min(dt_cfl, dt_max)
 
-        # Determine heater active state
-        heater_active = heater_enabled and (np.max(T) < heater_cutoff_temp)
+        heater_active = heater_enabled and (T_max < heater_cutoff_temp)
 
-        # Take a step
+        # Call kernel with T_cap
         T, alphas = step_3d(T, alphas, dt,
-                           rho, Cp, kx, ky, kz, dx, dy, dz,
-                           q_normal, reaction_params, T_amb, h_conv, eps, sigma, R,
-                           q_heater, heater_active)
+                            rho, Cp, kx, ky, kz, dx, dy, dz,
+                            q_normal, reaction_params, T_amb, h_conv, eps, sigma, R,
+                            q_heater, heater_active, T_cap)
         t += dt; step += 1
-        T_max = np.max(T)
-        
+
         # Sample history
         if t >= sample_next:
             times.append(t)
@@ -1384,24 +1393,25 @@ def run_simulation(params, progress_callback=None):
             T_mid_history.append(T[:, :, mid_z].copy())
             alpha_mid_history.append(alphas[0, :, :, mid_z].copy())
             sample_next += sample_interval
-        
-        # Snapshot storage
+
+        # Snapshot storage (float32 to halve memory)
         if t >= next_snapshot_time:
-            snapshots_3d.append(T.copy())
+            snapshots_3d.append(T.astype(np.float32))
             snapshot_times.append(t)
             next_snapshot_time += snapshot_interval
-        
-        # Safety
-        if T_max > safe_T_limit or dt < dt_min * 0.5:
+
+        # Safety break: too many steps or wall-clock limit
+        if step > max_steps or (time.time() - start_time) > wall_limit_s:
             break
-            
-        # UI update
-        if progress_callback is not None and step % ui_throttle == 0:
+
+        # UI update throttled by wall time (not step count)
+        if progress_callback is not None and (time.time() - last_ui) > 0.25:
             progress_callback(min(t / sim_time, 1.0))
+            last_ui = time.time()
 
     # Ensure final snapshot is stored
     if len(snapshots_3d) == 0 or snapshot_times[-1] < t - dt:
-        snapshots_3d.append(T.copy())
+        snapshots_3d.append(T.astype(np.float32))
         snapshot_times.append(t)
 
     # Build history list
@@ -1462,7 +1472,7 @@ def run_simulation(params, progress_callback=None):
     return history, metadata, final_3D, snapshots_3d, snapshot_times
 
 # -----------------------------------------------------------------------------
-# 10. Enhanced Plotting Functions – unchanged (work with new data)
+# 10. Enhanced Plotting Functions (unchanged)
 # -----------------------------------------------------------------------------
 def create_publication_heatmaps(simulations, frames, config, style_params):
     n_sims = len(simulations)
@@ -1747,7 +1757,7 @@ def create_time_series_with_marker(sim_data, current_time, style_params):
     return fig
 
 # -----------------------------------------------------------------------------
-# 12. Main UI – UPDATED with Heater Controls (central hotspot re-enabled)
+# 12. Main UI – UPDATED with new controls (max_steps, wall_limit, T_cap)
 # -----------------------------------------------------------------------------
 advanced_styling = get_styling_controls()
 
@@ -1763,10 +1773,10 @@ if operation_mode == "Run New Simulation":
     # ---- Time & Mesh ----
     with st.sidebar.expander("⏱️ Time & Mesh", expanded=True):
         sim_time = st.slider("Total Simulation Time (s)", 
-                             min_value=60, max_value=3600, value=600, step=30,
-                             help="Real thermal runaway takes 5‑15 minutes")
+                             min_value=10, max_value=600, value=60, step=10,
+                             help="Most dynamics finish within 30-60 s; the loop will exit early when fuel is exhausted.")
         snapshot_interval = st.slider("3D Snapshot Interval (s)",
-                                      min_value=1, max_value=120, value=30, step=5,
+                                      min_value=1, max_value=120, value=5, step=1,
                                       help="How often to save 3D field for time slider")
         col1, col2, col3 = st.columns(3)
         with col1:
@@ -1790,20 +1800,18 @@ if operation_mode == "Run New Simulation":
         ky = st.number_input("k_y (W/m·K)", 5.0, 60.0, 25.0, 1.0)
         kz = st.number_input("k_z (W/m·K)", 0.5, 5.0, 1.5, 0.1)
         T_amb = st.number_input("Ambient T (K)", 250, 350, 298, 1)
-        h_conv = st.number_input("h_conv (W/m²·K)", 0.0, 50.0, 5.0, 1.0,  # lowered default to 5
+        h_conv = st.number_input("h_conv (W/m²·K)", 0.0, 50.0, 5.0, 1.0,
                                  help="Lower values (1‑5) mimic near‑adiabatic conditions")
         eps = st.number_input("Emissivity", 0.05, 0.95, 0.90, 0.05)
     
-    # ===== UPDATED: "🔥 Trigger & Heater" with central hotspot enabled by default =====
+    # ===== Trigger & Heater =====
     with st.sidebar.expander("🔥 Trigger & Heater", expanded=True):
         col1, col2 = st.columns(2)
         with col1:
-            # Restored default to 450K and removed the disabled state for radius
             trigger_temp = st.number_input("Hotspot T (K)", 0, 2000, 450, 5,
                                            help="Central hotspot temperature. Set >400K for immediate runaway.")
             trigger_radius = st.slider("Hotspot radius (cells)", 1, 10, 3)
         with col2:
-            # Disabled by default to maintain perfect spherical symmetry
             heater_enabled = st.checkbox("Enable Boundary Heater (X=0 face)", value=False,
                                          help="Turn OFF for symmetric central runaway. Turn ON to simulate adjacent cell heating.")
             q_heater = st.number_input("Heater flux (W/m²)", 0, int(1e6), 30000, 1000,
@@ -1826,8 +1834,13 @@ if operation_mode == "Run New Simulation":
         cfl_factor = st.slider("CFL Safety Factor", 0.1, 0.45, 0.4, 0.05)
         adapt_dt_thresh = st.slider("Adaptive dt Threshold (K)", 400, 1000, 600, 10)
         adapt_dt_factor = st.slider("dt Shrink Factor", 0.5, 0.95, 0.8, 0.05)
-        ui_throttle = st.slider("UI Update Interval (steps)", 10, 1000, 200, 10)
         safe_T_limit = st.slider("Safety Cutoff Temp (K)", 1000, 2000, 1500, 50)
+        T_cap = st.slider("Temperature Cap (K)", 800, 1800, 1200, 50,
+                          help="Prevents numerical overshoot; must be above physical peak.")
+        max_steps = st.number_input("Max Steps (break)", 100000, 10000000, 2000000, 500000,
+                                    help="Safety break if step count exceeds this.")
+        wall_limit_s = st.number_input("Wall‑time Limit (s)", 30, 600, 300, 30,
+                                       help="Hard wall‑clock cap to prevent endless loops.")
 
     # ---- Reaction Presets ----
     with st.sidebar.expander("🔬 Reaction Kinetics Preset", expanded=True):
@@ -1861,7 +1874,7 @@ if operation_mode == "Run New Simulation":
 
     label = st.sidebar.text_input("Run Label (optional)", value=f"h={h_conv:.1f} q={q_heater:.0f} trig={trigger_temp:.0f}K")
 
-    # ---- UPDATED: Pre‑simulation Diagnostics ----
+    # ---- Pre‑simulation Diagnostics ----
     with st.sidebar.expander("🔍 Pre‑Simulation Diagnostics", expanded=False):
         st.write(f"**Trigger Temperature:** {trigger_temp} K" + (f" = {trigger_temp-273.15:.0f} °C" if trigger_temp>0 else " (disabled)"))
         st.write(f"**Ambient:** {T_amb} K = {T_amb-273.15:.0f} °C")
@@ -1934,8 +1947,10 @@ if operation_mode == "Run New Simulation":
             'cfl_factor': cfl_factor,
             'adapt_dt_thresh': adapt_dt_thresh,
             'adapt_dt_factor': adapt_dt_factor,
-            'ui_throttle': ui_throttle,
             'safe_T_limit': safe_T_limit,
+            'T_cap': T_cap,
+            'max_steps': max_steps,
+            'wall_limit_s': wall_limit_s,
             'snapshot_interval': snapshot_interval,
             'heater_enabled': heater_enabled,
             'q_heater': q_heater if heater_enabled else 0.0,
@@ -2406,7 +2421,7 @@ if st.sidebar.button("📦 Generate Export", type="primary"):
 # -----------------------------------------------------------------------------
 # 14. Theoretical Documentation – updated with physics notes
 # -----------------------------------------------------------------------------
-with st.expander("🔬 Theoretical Soundness & Advanced Analysis (v3.0)", expanded=False):
+with st.expander("🔬 Theoretical Soundness & Advanced Analysis (v3.1)", expanded=False):
     st.markdown("""
     **Multi‑Stage Arrhenius Kinetics** (corrected α evolution)
     - **SEI decomposition** (r=0): depends on remaining SEI, i.e., `(1‑α)`
@@ -2437,6 +2452,15 @@ with st.expander("🔬 Theoretical Soundness & Advanced Analysis (v3.0)", expand
     **New Line Profiling & Correlation**
     - Extract 1D gradients along any axis or diagonal.
     - Correlate final Tmax with any input parameter (including `q_heater` and `heater_cutoff_temp`).
+
+    **Version 3.1 Fixes (OOM & Numerical Stability)**
+    - Conservative fuel consumption (`dalpha` capped by remaining fuel).
+    - Heat generation capped to avoid overshoot (T_cap).
+    - Explicit NaN/infinite checks and early exit.
+    - Loop exits when fuel < 2% (no need to grind through cooling phase).
+    - UI updates throttled by wall time (max 4 Hz), avoiding message flood.
+    - Snapshots stored as `float32`.
+    - Added `max_steps` and `wall_limit_s` as safety nets.
     """)
 
-st.caption("🔥 Physics‑Corrected v3.0 • Validated against Zhang et al. 2024 • Symmetric hotspot (450 K) re‑enabled • Kinetics fixed • Click 'Run & Save' to start.")
+st.caption("🔥 Physics‑Corrected v3.1 • OOM‑safe • Central hotspot (450 K) • Kinetics fixed • Efficient for rapid parametric sweeps.")
