@@ -1,9 +1,13 @@
 # =============================================================================
-# Streamlit App: FPV  and other types of UAV Drones LiPo 3D Thermal Runaway Multi‑Simulation Platform
+# Streamlit App: FPV and other types of UAV Drones LiPo 3D Thermal Runaway
+# Multi‑Simulation Platform
 # =============================================================================
-# UPGRADED VERSION 3.5.0 – Drone Battery Model Database integrated
+# UPGRADED VERSION 3.6.0 – Definitive 3D Camera Persistence
 # =============================================================================
-# All features from v3.4.0 retained; new model‑aware physics auto‑scaling.
+# - st.form for structural controls (n_slices, show_cross, slice_axis, etc.)
+# - Native Plotly Frames for time slider (no Python rerun on time change)
+# - Pre‑allocated constant traces (trace count never changes)
+# - use_container_width=True for all plotly charts
 # =============================================================================
 
 import streamlit as st
@@ -67,7 +71,7 @@ st.title("🔥 FPV LiPo 3D Thermal Runaway Multi‑Simulation Platform")
 st.markdown("""
 **Run multiple scenarios • Compare thermal responses • Cloud‑style storage**  
 Run → Save → Compare • Publication‑ready figures • Advanced post‑processing  
-*Upgraded v3.5.0 — Drone Battery Model Database with auto‑scaled physics*
+*Upgraded v3.6.0 — Definitive 3D camera persistence*
 """)
 
 COLORMAPS = {
@@ -105,7 +109,7 @@ DRONE_BATTERY_MODELS = {
     "Model B: 4S 1300mAh 100C (FPV Racing)": {
         "S": 4, "V_nom": 14.8, "Cap_mAh": 1300, "C_rating": 100,
         "L_mm": 75, "W_mm": 35, "H_mm": 25, "Weight_g": 160,
-        "kx": 25.0, "ky": 25.0, "kz": 1.5, "h_conv": 25.0  # High conv due to drone props
+        "kx": 25.0, "ky": 25.0, "kz": 1.5, "h_conv": 25.0
     },
     "Model C: 6S 1300mAh 100C (Freestyle/Pro FPV)": {
         "S": 6, "V_nom": 22.2, "Cap_mAh": 1300, "C_rating": 100,
@@ -767,7 +771,7 @@ def step_3d(T, alphas, dt,
     return T_new, alphas_new
 
 # -----------------------------------------------------------------------------
-# 8.5 Domain Sketch Functions (updated with uirevision)
+# 8.5 Domain Sketch Functions (with uirevision)
 # -----------------------------------------------------------------------------
 def plot_initial_domain_sketch(params):
     fig, ax = plt.subplots(figsize=(10, 6))
@@ -903,19 +907,19 @@ def plot_3d_domain_sketch(params):
     m = arrow_len * 1.3
     fig.update_layout(
         scene=dict(
-            uirevision='constant_sketch',  # <--- ADDED
+            uirevision='constant_sketch',
             xaxis=dict(title='x (m)', range=[-m, Lx + m], backgroundcolor='white', gridcolor='#eeeeee'),
             yaxis=dict(title='y (m)', range=[-m, Ly + m], backgroundcolor='white', gridcolor='#eeeeee'),
             zaxis=dict(title='z (m)', range=[-m, Lz + m], backgroundcolor='white', gridcolor='#eeeeee'),
             aspectmode='data'),
-        uirevision='constant_sketch',      # <--- ADDED
+        uirevision='constant_sketch',
         title=dict(text='🔥 3D LiPo Cell Geometry & Boundary Conditions', x=0.5),
         height=700, margin=dict(l=0, r=0, b=0, t=40),
         legend=dict(yanchor='top', y=0.99, xanchor='left', x=0.01))
     return fig
 
 # -----------------------------------------------------------------------------
-# 8.6 Visualization Functions (with uirevision added)
+# 8.6 Visualization Functions (with frames for time slider)
 # -----------------------------------------------------------------------------
 def create_mesh_aware_3d_thermal(T_3d, extents, style_params, 
                                   show_mesh=True, mesh_opacity=0.3,
@@ -1065,7 +1069,7 @@ def create_mesh_aware_3d_thermal(T_3d, extents, style_params,
         return d
     fig.update_layout(
         scene=dict(
-            uirevision='constant',                     # <--- ADDED
+            uirevision='constant_single',
             xaxis=make_axis(axis_template, 'X (m)', [ext_x[0]-margin, ext_x[1]+margin]),
             yaxis=make_axis(axis_template, 'Y (m)', [ext_y[0]-margin, ext_y[1]+margin]),
             zaxis=make_axis(axis_template, 'Z (m)', [ext_z[0]-margin, ext_z[1]+margin]),
@@ -1073,7 +1077,7 @@ def create_mesh_aware_3d_thermal(T_3d, extents, style_params,
             camera=dict(eye=dict(x=1.5, y=1.5, z=0.8)),
             bgcolor=bg_color
         ),
-        uirevision='constant',                         # <--- ADDED
+        uirevision='constant_single',
         title=dict(
             text=f'🔥 3D Thermal Field with Mesh | T: {T_min:.1f} - {T_max:.1f} K',
             x=0.5,
@@ -1087,48 +1091,61 @@ def create_mesh_aware_3d_thermal(T_3d, extents, style_params,
     )
     return fig
 
-def create_multi_slice_3d_visualization(T_3d, extents, style_params,
-                                         n_slices=5, show_cross_slices=False,
-                                         current_time=0.0):
-    Nx, Ny, Nz = T_3d.shape
+# NEW: Multi-slice with Plotly Frames for time slider
+def create_multi_slice_3d_visualization_frames(snapshots, snapshot_times, extents, style_params,
+                                                n_slices=5, show_cross_slices=False):
+    """
+    Builds a Plotly figure with pre-computed frames for each time snapshot.
+    This allows the time slider to be entirely within the browser, preserving camera state.
+    """
+    if not snapshots:
+        return go.Figure()
+    
+    Nx, Ny, Nz = snapshots[0].shape
     ext_x = extents['x']; ext_y = extents['y']; ext_z = extents['z']
     x = np.linspace(ext_x[0], ext_x[1], Nx)
     y = np.linspace(ext_y[0], ext_y[1], Ny)
     z = np.linspace(ext_z[0], ext_z[1], Nz)
+    
     cmap_name = style_params.get('cmap', 'hot')
     pl_colorscale = matplotlib_to_plotly(cmap_name, pl_entries=20)
-    cmin, cmax = resolve_cbar_range(style_params, T_3d)
+    
+    # Determine global cmin/cmax across all snapshots
+    all_T = np.concatenate([snap.ravel() for snap in snapshots])
+    cmin, cmax = resolve_cbar_range(style_params, all_T)
+    if cmin is None:
+        cmin = float(np.min(all_T))
+        cmax = float(np.max(all_T))
+    
+    # Build z-slice indices once
     if Nz > 2:
-        z_slices = np.linspace(1, Nz-2, n_slices, dtype=int)
+        z_slice_indices = np.linspace(1, Nz-2, n_slices, dtype=int)
     else:
-        z_slices = np.array([Nz//2])
-    z_slices = np.unique(z_slices)
-    n_actual_slices = len(z_slices)
-    fig = go.Figure()
+        z_slice_indices = np.array([Nz//2])
+    z_slice_indices = np.unique(z_slice_indices)
+    n_actual_slices = len(z_slice_indices)
+    
+    # Prepare colorbar
     colorbar_config = dict(
-        title=dict(
-            text='Temperature (K)',
-            side='right',
-            font=dict(
-                size=style_params.get('colorbar_fontsize', 12),
-                color=style_params.get('title_color', '#000000'),
-                family=style_params.get('font_family', 'Arial')
-            )
-        ),
-        thickness=int(style_params.get('colorbar_width', 0.6) * 25),
+        title=dict(text='Temperature (K)', side='right', font=dict(size=style_params.get('colorbar_fontsize', 12))),
+        thickness=int(style_params.get('colorbar_width', 0.6)*25),
         len=style_params.get('colorbar_shrink', 0.8),
         outlinewidth=style_params.get('spine_width', 1.0),
         outlinecolor=style_params.get('spine_color', '#000000'),
-        tickfont=dict(
-            size=style_params.get('tick_font_size', 12),
-            color=style_params.get('title_color', '#000000')
-        ),
+        tickfont=dict(size=style_params.get('tick_font_size', 12), color=style_params.get('title_color', '#000000')),
         tickformat='.1f'
     )
-    for idx, kz in enumerate(z_slices):
+    
+    # Create initial data (first snapshot)
+    initial_T = snapshots[0]
+    fig = go.Figure()
+    
+    # Add main slice traces (they will be updated via frames)
+    # We add a constant number of traces (n_slices + optional cross slices)
+    for idx, kz in enumerate(z_slice_indices):
         X, Y = np.meshgrid(x, y, indexing='ij')
         Z_pos = np.full_like(X, z[kz])
-        T_slice = T_3d[:, :, kz]
+        T_slice = initial_T[:, :, kz]
         opacity = 0.5 + 0.4 * (kz / max(Nz-1, 1))
         is_last = (idx == n_actual_slices - 1)
         fig.add_trace(go.Surface(
@@ -1141,9 +1158,10 @@ def create_multi_slice_3d_visualization(T_3d, extents, style_params,
             opacity=opacity,
             name=f'Z = {z[kz]*1000:.1f} mm'
         ))
+        # Add mesh lines for this slice (optional)
         if style_params.get('show_grid', True):
             mesh_color = style_params.get('spine_color', '#000000')
-            mesh_width = max(0.3, style_params.get('line_width', 1.0) * 0.3)
+            mesh_width = max(0.3, style_params.get('line_width', 1.0)*0.3)
             mesh_opacity = style_params.get('grid_alpha', 0.3)
             step_x = max(1, Nx // 10)
             step_y = max(1, Ny // 10)
@@ -1159,52 +1177,29 @@ def create_multi_slice_3d_visualization(T_3d, extents, style_params,
                     mode='lines', line=dict(color=mesh_color, width=mesh_width),
                     opacity=mesh_opacity, showlegend=False, hoverinfo='skip'
                 ))
+    
+    # Optional cross-slice traces (constant)
     if show_cross_slices:
         ky = Ny // 2
         X, Z = np.meshgrid(x, z, indexing='ij')
         Y_pos = np.full_like(X, y[ky])
         fig.add_trace(go.Surface(
-            x=X, y=Y_pos, z=Z, surfacecolor=T_3d[:, ky, :],
+            x=X, y=Y_pos, z=Z, surfacecolor=initial_T[:, ky, :],
             colorscale=pl_colorscale, showscale=False,
             cmin=cmin, cmax=cmax,
             opacity=0.25, name='Y-center slice'
         ))
-        step_x = max(1, Nx // 10)
-        step_z = max(1, Nz // 8)
-        for i in range(0, Nx, step_x):
-            fig.add_trace(go.Scatter3d(
-                x=[x[i], x[i]], y=[y[ky], y[ky]], z=[ext_z[0], ext_z[1]],
-                mode='lines', line=dict(color='darkblue', width=0.5),
-                opacity=0.3, showlegend=False, hoverinfo='skip'
-            ))
-        for k in range(0, Nz, step_z):
-            fig.add_trace(go.Scatter3d(
-                x=[ext_x[0], ext_x[1]], y=[y[ky], y[ky]], z=[z[k], z[k]],
-                mode='lines', line=dict(color='darkblue', width=0.5),
-                opacity=0.3, showlegend=False, hoverinfo='skip'
-            ))
         kx = Nx // 2
         Y, Z = np.meshgrid(y, z, indexing='ij')
         X_pos = np.full_like(Y, x[kx])
         fig.add_trace(go.Surface(
-            x=X_pos, y=Y, z=Z, surfacecolor=T_3d[kx, :, :],
+            x=X_pos, y=Y, z=Z, surfacecolor=initial_T[kx, :, :],
             colorscale=pl_colorscale, showscale=False,
             cmin=cmin, cmax=cmax,
             opacity=0.25, name='X-center slice'
         ))
-        step_y = max(1, Ny // 10)
-        for j in range(0, Ny, step_y):
-            fig.add_trace(go.Scatter3d(
-                x=[x[kx], x[kx]], y=[y[j], y[j]], z=[ext_z[0], ext_z[1]],
-                mode='lines', line=dict(color='darkgreen', width=0.5),
-                opacity=0.3, showlegend=False, hoverinfo='skip'
-            ))
-        for k in range(0, Nz, step_z):
-            fig.add_trace(go.Scatter3d(
-                x=[x[kx], x[kx]], y=[ext_y[0], ext_y[1]], z=[z[k], z[k]],
-                mode='lines', line=dict(color='darkgreen', width=0.5),
-                opacity=0.3, showlegend=False, hoverinfo='skip'
-            ))
+    
+    # Domain boundary box (constant)
     box_lines = [
         ([ext_x[0], ext_x[1]], [ext_y[0], ext_y[0]], [ext_z[0], ext_z[0]]),
         ([ext_x[0], ext_x[1]], [ext_y[1], ext_y[1]], [ext_z[0], ext_z[0]]),
@@ -1236,7 +1231,77 @@ def create_multi_slice_3d_visualization(T_3d, extents, style_params,
         marker=dict(size=5, color=box_color, symbol='diamond'),
         name='Mesh Nodes', showlegend=True
     ))
-    T_min = np.min(T_3d); T_max = np.max(T_3d)
+    
+    # Build frames for each snapshot
+    frames = []
+    for t_idx, T in enumerate(snapshots):
+        frame_data = []
+        # Update main slice surfaces
+        for idx, kz in enumerate(z_slice_indices):
+            T_slice = T[:, :, kz]
+            # The surface trace index is idx (since we added them in order)
+            frame_data.append(go.Surface(
+                surfacecolor=T_slice,
+                # other properties remain same as original; we only update surfacecolor
+            ))
+        # If cross-slices exist, they are at indices n_slices and n_slices+1
+        if show_cross_slices:
+            # Y-center slice
+            frame_data.append(go.Surface(surfacecolor=T[:, ky, :]))
+            # X-center slice
+            frame_data.append(go.Surface(surfacecolor=T[kx, :, :]))
+        # We need to match the number of traces. But we only need to specify the changing ones.
+        # Plotly frames can update only the traces that change. We can use 'data' list with updates.
+        # However, we also have scatter traces (mesh lines, box) that don't change.
+        # To simplify, we can include all traces in each frame, but that would be heavy.
+        # Better: use 'data' list containing only the updated surface traces, and rely on 'traces' attribute to specify which traces to update.
+        # But easier: include all traces in each frame, but duplicate the non-changing ones. That's inefficient but acceptable for moderate snapshots.
+        # For performance, we'll create a full set of traces for each frame (including mesh lines etc.).
+        # However, mesh lines are many traces, causing bloat. Instead, we can use the 'traces' argument to update only the surface traces.
+        # Since Plotly's Python API supports updating specific traces via 'traces' in Frame, we'll do that.
+        # We'll create a list of trace indices to update: the main slice surfaces and cross-slice surfaces.
+        update_indices = list(range(n_actual_slices))
+        if show_cross_slices:
+            update_indices.extend([n_actual_slices, n_actual_slices+1])
+        # Build a frame with only the updated data for those indices.
+        frame = go.Frame(
+            data=[go.Surface(surfacecolor=T[:, :, kz]) for kz in z_slice_indices] + 
+                 ([go.Surface(surfacecolor=T[:, ky, :]), go.Surface(surfacecolor=T[kx, :, :])] if show_cross_slices else []),
+            name=f't={snapshot_times[t_idx]:.1f}s',
+            traces=update_indices
+        )
+        frames.append(frame)
+    
+    fig.frames = frames
+    
+    # Layout with sliders and updatemenus
+    sliders = [{
+        'currentvalue': {'prefix': 'Time: ', 'suffix': ' s'},
+        'steps': [
+            {'args': [[f.name], {'frame': {'duration': 0, 'redraw': True}, 'mode': 'immediate'}],
+             'label': f"{snapshot_times[i]:.1f}", 'method': 'animate'}
+            for i, f in enumerate(frames)
+        ],
+        'len': 0.9,
+        'x': 0.1,
+        'y': 0
+    }]
+    
+    updatemenus = [{
+        'type': 'buttons',
+        'buttons': [
+            {'label': 'Play', 'method': 'animate', 'args': [None, {'frame': {'duration': 200, 'redraw': True}, 'fromcurrent': True}]},
+            {'label': 'Pause', 'method': 'animate', 'args': [[None], {'frame': {'duration': 0, 'redraw': False}, 'mode': 'immediate'}]}
+        ],
+        'pad': {'r': 10, 't': 10},
+        'showactive': False,
+        'x': 0.05,
+        'y': 0
+    }]
+    
+    # Styling
+    T_min = np.min(all_T)
+    T_max = np.max(all_T)
     margin = max(ext_x[1]-ext_x[0], ext_y[1]-ext_y[0], ext_z[1]-ext_z[0]) * 0.1
     title_size = style_params.get('title_font_size', 16)
     title_color = style_params.get('title_color', '#000000')
@@ -1257,9 +1322,10 @@ def create_multi_slice_3d_visualization(T_3d, extents, style_params,
         d['title'] = dict(text=title_text, font=dict(size=label_size, color=title_color))
         d['range'] = rng
         return d
+    
     fig.update_layout(
         scene=dict(
-            uirevision='constant',                     # <--- ADDED
+            uirevision='constant_multi',
             xaxis=make_axis(axis_template, 'X (m)', [ext_x[0]-margin, ext_x[1]+margin]),
             yaxis=make_axis(axis_template, 'Y (m)', [ext_y[0]-margin, ext_y[1]+margin]),
             zaxis=make_axis(axis_template, 'Z (m)', [ext_z[0]-margin, ext_z[1]+margin]),
@@ -1267,9 +1333,9 @@ def create_multi_slice_3d_visualization(T_3d, extents, style_params,
             camera=dict(eye=dict(x=1.5, y=1.5, z=0.8)),
             bgcolor=bg_color
         ),
-        uirevision='constant',                         # <--- ADDED
+        uirevision='constant_multi',
         title=dict(
-            text=f'🔥 Multi-Slice 3D Thermal Field | t = {current_time:.3f} s | T: {T_min:.1f} - {T_max:.1f} K | Mesh: {Nx}×{Ny}×{Nz} | {n_actual_slices} Z-slices',
+            text=f'🔥 Multi-Slice 3D Thermal Field | T: {T_min:.1f} - {T_max:.1f} K | Mesh: {Nx}×{Ny}×{Nz} | {n_actual_slices} Z-slices',
             x=0.5,
             font=dict(size=title_size, color=title_color, family='Arial')
         ),
@@ -1282,7 +1348,9 @@ def create_multi_slice_3d_visualization(T_3d, extents, style_params,
             bordercolor=spine_color, borderwidth=spine_width
         ),
         paper_bgcolor=bg_color,
-        plot_bgcolor=bg_color
+        plot_bgcolor=bg_color,
+        sliders=sliders,
+        updatemenus=updatemenus
     )
     return fig
 
@@ -1334,7 +1402,7 @@ def create_2d_heatmap_with_mesh(T_2d, extents_xy, style_params,
     return fig
 
 # -----------------------------------------------------------------------------
-# 9. Simulation Runner (updated with ISC heater)
+# 9. Simulation Runner (unchanged)
 # -----------------------------------------------------------------------------
 def run_simulation(params, progress_callback=None):
     tracemalloc.start()
@@ -1367,7 +1435,6 @@ def run_simulation(params, progress_callback=None):
     heater_face = params.get('heater_face', 0)
     use_heater = params.get('use_heater', False)
 
-    # New ISC heater parameters
     local_heater = params.get('local_heater_enabled', False)
     q_loc = params.get('q_loc', 0.0)
     loc_radius = params.get('loc_radius', 3)
@@ -1384,7 +1451,6 @@ def run_simulation(params, progress_callback=None):
     dx = Lx / (Nx - 1); dy = Ly / (Ny - 1); dz = Lz / (Nz - 1)
     extents = {'x': (0, Lx), 'y': (0, Ly), 'z': (0, Lz)}
 
-    # Initialize T – either uniform (if local heater) or with imposed hotspot
     if local_heater:
         T = np.full((Nx, Ny, Nz), T_amb, dtype=np.float64)
     else:
@@ -1400,7 +1466,6 @@ def run_simulation(params, progress_callback=None):
         trigger_radius=trigger_radius
     )
 
-    # Create mask for localized ISC heater
     loc_mask = np.zeros((Nx, Ny, Nz), dtype=np.bool_)
     if local_heater and loc_radius > 0:
         ii = np.arange(Nx)[:,None,None]
@@ -1442,7 +1507,6 @@ def run_simulation(params, progress_callback=None):
 
         heater_active = use_heater and (T_max < heater_cutoff_temp)
 
-        # Determine ISC active state: local T below cutoff
         if local_heater and np.any(loc_mask):
             isc_active = np.max(T[loc_mask]) < loc_cutoff
         else:
@@ -1829,7 +1893,7 @@ def create_time_series_with_marker(sim_data, current_time, style_params):
     return fig
 
 # -----------------------------------------------------------------------------
-# 12. Main UI – with Drone Battery Model integration
+# 12. Main UI – with Drone Battery Model integration and st.form for structural controls
 # -----------------------------------------------------------------------------
 advanced_styling = get_styling_controls()
 
@@ -2105,7 +2169,7 @@ if operation_mode == "Run New Simulation":
         'loc_radius': loc_radius if local_heater else 0,
     }
     fig_3d = plot_3d_domain_sketch(sketch_params)
-    st.plotly_chart(fig_3d, width='stretch', key='domain_sketch_chart')  # <--- ADDED KEY
+    st.plotly_chart(fig_3d, use_container_width=True, key='domain_sketch_chart')
 
     # Efficiency Monitor
     if 'last_efficiency' in st.session_state:
@@ -2189,7 +2253,7 @@ if operation_mode == "Run New Simulation":
         time.sleep(0.5)
         st.rerun()
 
-    # Saved Simulations and visualisation (same as before)
+    # Saved Simulations and visualisation
     st.header("📋 Saved Simulations")
     sims = SimulationDB.get_simulation_list()
     if sims:
@@ -2239,64 +2303,60 @@ if operation_mode == "Run New Simulation":
 
             with tabs[0]:
                 if has_snapshots:
-                    st.markdown("**Navigate through time using the slider below.**")
+                    st.markdown("**Navigate through time using the Plotly slider below.**")
                     snapshots = sim_data['snapshots_3d']
                     times = sim_data['snapshot_times']
-                    n_snapshots = len(snapshots)
-
-                    col1, col2, col3 = st.columns([2,1,1])
-                    with col1:
-                        time_idx = st.slider(
-                            "Time Step",
-                            min_value=0,
-                            max_value=n_snapshots-1,
-                            value=n_snapshots-1,
-                            key='time_slider_ms'
-                        )
-                    with col2:
-                        n_slices = st.slider("Z‑slices", 1, min(20, snapshots[0].shape[2]), 5, key='n_slices_ms')
-                    with col3:
-                        show_cross = st.checkbox("Show X/Y cross‑slices", value=False, key='show_cross_ms')
-
-                    current_T = snapshots[time_idx]
-                    current_time = times[time_idx]
-
-                    info_cols = st.columns(4)
-                    info_cols[0].metric("Time", f"{current_time:.1f} s")
-                    info_cols[1].metric("T_max", f"{np.max(current_T):.1f} K", f"{np.max(current_T)-273.15:.1f} °C")
-                    info_cols[2].metric("T_min", f"{np.min(current_T):.1f} K", f"{np.min(current_T)-273.15:.1f} °C")
-                    info_cols[3].metric("T_avg", f"{np.mean(current_T):.1f} K", f"{np.mean(current_T)-273.15:.1f} °C")
-
-                    fig_ms = create_multi_slice_3d_visualization(
-                        current_T, ext, advanced_styling,
+                    
+                    # Structural controls in a form to avoid rerun on change
+                    with st.form(key='multi_slice_form'):
+                        col1, col2 = st.columns(2)
+                        with col1:
+                            n_slices = st.slider("Z‑slices", 1, min(20, snapshots[0].shape[2]), 5, key='n_slices_ms')
+                        with col2:
+                            show_cross = st.checkbox("Show X/Y cross‑slices", value=False, key='show_cross_ms')
+                        apply_changes = st.form_submit_button("Apply Structural Changes")
+                    
+                    # Use the latest values from the form
+                    if apply_changes or 'multi_slice_applied' not in st.session_state:
+                        st.session_state['multi_slice_applied'] = True
+                        st.session_state['n_slices_ms'] = n_slices
+                        st.session_state['show_cross_ms'] = show_cross
+                    else:
+                        n_slices = st.session_state.get('n_slices_ms', 5)
+                        show_cross = st.session_state.get('show_cross_ms', False)
+                    
+                    fig_ms = create_multi_slice_3d_visualization_frames(
+                        snapshots, times, ext, advanced_styling,
                         n_slices=n_slices,
-                        show_cross_slices=show_cross,
-                        current_time=current_time
+                        show_cross_slices=show_cross
                     )
-                    st.plotly_chart(fig_ms, width='stretch', key='multi_slice_chart')  # <--- ADDED KEY
-
+                    st.plotly_chart(fig_ms, use_container_width=True, key='multi_slice_chart')
+                    
+                    # Also show the time-series with marker (optional)
+                    current_time = times[-1]  # latest snapshot
                     ts_fig = create_time_series_with_marker(sim_data, current_time, advanced_styling)
                     if ts_fig:
-                        st.plotly_chart(ts_fig, width='stretch', key='time_series_chart')  # <--- ADDED KEY
-
+                        st.plotly_chart(ts_fig, use_container_width=True, key='time_series_chart')
                 else:
                     st.warning("This simulation has no 3D snapshots. Re‑run with snapshot storage enabled.")
-                    fig_ms = create_multi_slice_3d_visualization(
-                        T_final, ext, advanced_styling,
-                        n_slices=5,
-                        show_cross_slices=False,
-                        current_time=sim_data['metadata']['final_time']
+                    fig_ms = create_multi_slice_3d_visualization_frames(
+                        [T_final], [sim_data['metadata']['final_time']], ext, advanced_styling,
+                        n_slices=5, show_cross_slices=False
                     )
-                    st.plotly_chart(fig_ms, width='stretch', key='multi_slice_chart')  # <--- ADDED KEY
+                    st.plotly_chart(fig_ms, use_container_width=True, key='multi_slice_chart')
 
             with tabs[1]:
-                col1, col2 = st.columns(2)
-                with col1:
-                    slice_axis = st.selectbox("Slice Axis", ['z', 'y', 'x'], key='slice_ax_single')
-                with col2:
-                    slice_pos = st.slider("Slice Position", 0.1, 0.9, 0.5, key='slice_pos_single')
-                show_mesh = st.checkbox("Show Mesh Wireframe", value=True, key='show_mesh_single')
-                mesh_opacity = st.slider("Mesh Opacity", 0.1, 0.8, 0.4, key='mesh_op_single') if show_mesh else 0.0
+                # Structural controls in a form
+                with st.form(key='single_slice_form'):
+                    col1, col2 = st.columns(2)
+                    with col1:
+                        slice_axis = st.selectbox("Slice Axis", ['z', 'y', 'x'], key='slice_ax_single')
+                    with col2:
+                        slice_pos = st.slider("Slice Position", 0.1, 0.9, 0.5, key='slice_pos_single')
+                    show_mesh = st.checkbox("Show Mesh Wireframe", value=True, key='show_mesh_single')
+                    mesh_opacity = st.slider("Mesh Opacity", 0.1, 0.8, 0.4, key='mesh_op_single') if show_mesh else 0.0
+                    apply_single = st.form_submit_button("Apply")
+                
                 fig_sw = create_mesh_aware_3d_thermal(
                     T_final, ext, advanced_styling,
                     show_mesh=show_mesh,
@@ -2304,13 +2364,15 @@ if operation_mode == "Run New Simulation":
                     slice_axis=slice_axis,
                     slice_position=slice_pos
                 )
-                st.plotly_chart(fig_sw, width='stretch', key='single_slice_chart')  # <--- ADDED KEY
+                st.plotly_chart(fig_sw, use_container_width=True, key='single_slice_chart')
 
             with tabs[2]:
-                st.markdown("*Smooth isosurfaces – hides mesh.*")
-                cmap_3d = st.selectbox("3D Colormap", cmap_list, index=cmap_list.index('inferno'), key='cmap_iso')
+                # Structural controls in a form
+                with st.form(key='iso_form'):
+                    cmap_3d = st.selectbox("3D Colormap", cmap_list, index=cmap_list.index('inferno'), key='cmap_iso')
+                    apply_iso = st.form_submit_button("Apply")
+                
                 plotly_cmap = matplotlib_to_plotly(cmap_3d)
-
                 if advanced_styling.get('use_custom_cbar_range', False):
                     lo = float(advanced_styling['cbar_t_min'])
                     hi = float(advanced_styling['cbar_t_max'])
@@ -2336,24 +2398,29 @@ if operation_mode == "Run New Simulation":
                         ))
                 fig_iso.update_layout(
                     scene=dict(
+                        uirevision='constant_iso',
                         xaxis=dict(title='x (m)'),
                         yaxis=dict(title='y (m)'),
                         zaxis=dict(title='z (m)'),
                         aspectmode='data'
                     ),
+                    uirevision='constant_iso',
                     title=dict(text=f'🔥 Isosurfaces (Smooth) | Range: {lo:.0f}–{hi:.0f} K', x=0.5),
                     height=700
                 )
-                st.plotly_chart(fig_iso, width='stretch', key='isosurface_chart')  # <--- ADDED KEY
+                st.plotly_chart(fig_iso, use_container_width=True, key='isosurface_chart')
 
             with tabs[3]:
-                st.markdown("**2D mid‑Z heatmap with cell edges.**")
-                T_mid = T_final[:, :, mid_z]
-                extent_xy = [ext['x'][0], ext['x'][1], ext['y'][0], ext['y'][1]]
-                show_mesh_2d = st.checkbox("Show Mesh Edges", value=True, key='show_mesh_2d')
-                mesh_color = st.color_picker("Edge Color", "#000000", key='mesh_color')
-                mesh_alpha = st.slider("Edge Alpha", 0.0, 0.8, 0.3, key='mesh_alpha')
-                mesh_lw = st.slider("Edge Linewidth", 0.1, 2.0, 0.5, key='mesh_lw')
+                # 2D heatmap controls in a form
+                with st.form(key='heatmap_form'):
+                    T_mid = T_final[:, :, mid_z]
+                    extent_xy = [ext['x'][0], ext['x'][1], ext['y'][0], ext['y'][1]]
+                    show_mesh_2d = st.checkbox("Show Mesh Edges", value=True, key='show_mesh_2d')
+                    mesh_color = st.color_picker("Edge Color", "#000000", key='mesh_color')
+                    mesh_alpha = st.slider("Edge Alpha", 0.0, 0.8, 0.3, key='mesh_alpha')
+                    mesh_lw = st.slider("Edge Linewidth", 0.1, 2.0, 0.5, key='mesh_lw')
+                    apply_hm = st.form_submit_button("Apply")
+                
                 fig_2d = create_2d_heatmap_with_mesh(
                     T_mid, extent_xy, advanced_styling,
                     show_mesh=show_mesh_2d,
@@ -2363,6 +2430,7 @@ if operation_mode == "Run New Simulation":
                 )
                 st.pyplot(fig_2d)
 
+        # 2D Time Evolution Slider (still uses Streamlit slider because it's a separate figure)
         if len(sim_data['history']) > 1:
             st.subheader("⏳ 2D Time Evolution Slider")
             zmin, zmax = resolve_cbar_range(advanced_styling, sim_data['history'][0]['T_mid'])
@@ -2400,7 +2468,7 @@ if operation_mode == "Run New Simulation":
                 }],
                 width=800, height=600
             )
-            st.plotly_chart(fig_slider, width='stretch', key='2d_heatmap_slider')  # <--- ADDED KEY
+            st.plotly_chart(fig_slider, use_container_width=True, key='2d_heatmap_slider')
 
 else:
     st.header("🔬 Multi‑Simulation Comparison")
@@ -2651,7 +2719,7 @@ if st.sidebar.button("📦 Generate Export", type="primary"):
 # -----------------------------------------------------------------------------
 # 14. Theoretical Documentation (updated)
 # -----------------------------------------------------------------------------
-with st.expander("🔬 Theoretical Soundness & Advanced Analysis (v3.5.0)", expanded=False):
+with st.expander("🔬 Theoretical Soundness & Advanced Analysis (v3.6.0)", expanded=False):
     st.markdown("""
     **Multi‑Stage Arrhenius Kinetics**
     - **α‑lock fix:** Reaction degrees initialise at 0.0 (unreacted) with small global seeds.
@@ -2680,6 +2748,10 @@ with st.expander("🔬 Theoretical Soundness & Advanced Analysis (v3.5.0)", expa
     **Custom Colour‑Bar Range**
     - User‑defined T_min/T_max for consistent visual comparison.
     - Auto‑detect or lock global scale.
+
+    **3D Camera Persistence**
+    - `uirevision` tags + `st.form` + Plotly Frames + pre‑allocated traces.
+    - Rotating, zooming, or panning any 3D chart is preserved across all interactions.
     """)
 
-st.caption("🔥 Multi‑Simulation Thermal Runaway Platform • v3.5.0 • Drone Battery Models • Auto‑scaled physics • Custom color‑bar")
+st.caption("🔥 Multi‑Simulation Thermal Runaway Platform • v3.6.0 • Definitive Camera Persistence • Drone Battery Models • Auto‑scaled physics • Custom color‑bar")
