@@ -1789,9 +1789,21 @@ def apply_preset(preset_name):
         st.rerun()
 
 # Initialize session_state defaults for preset keys if not present
-for key in ['trigger_temp', 'trigger_radius', 'h_conv', 'eps', 'kx', 'ky', 'kz', 'T_cap', 'safe_T_limit', 'reaction_preset']:
+preset_defaults = {
+    'trigger_temp': 450,
+    'trigger_radius': 3,
+    'h_conv': 5.0,
+    'eps': 0.9,
+    'kx': 25.0,
+    'ky': 25.0,
+    'kz': 1.5,
+    'T_cap': 1200,
+    'safe_T_limit': 1500,
+    'reaction_preset': 'Realistic (Recommended)'
+}
+for key, default_val in preset_defaults.items():
     if f'preset_{key}' not in st.session_state:
-        st.session_state[f'preset_{key}'] = None  # will be filled by widget defaults
+        st.session_state[f'preset_{key}'] = default_val
 
 operation_mode = st.sidebar.radio(
     "Operation Mode",
@@ -1940,7 +1952,7 @@ if operation_mode == "Run New Simulation":
                     with c3:
                         reaction_params[i,2] = st.number_input(f"H{i} (W/m³)", value=float(reaction_params[i,2]), key=f'h_{i}')
 
-    label = st.sidebar.text_input("Run Label (optional)", value=f"h={h_conv:.1f} trig={trigger_temp:.0f}K")
+    label = st.sidebar.text_input("Run Label (optional)", value=f"h={h_conv or 5.0:.1f} trig={trigger_temp or 450:.0f}K")
 
     # ===== Pre‑Simulation Diagnostics =====
     with st.sidebar.expander("🔍 Pre‑Simulation Diagnostics", expanded=False):
