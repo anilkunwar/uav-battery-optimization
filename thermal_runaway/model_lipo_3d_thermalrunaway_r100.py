@@ -1333,6 +1333,12 @@ def run_simulation(params, progress_callback=None):
     sim_time = params.get('sim_time', t_max)  # override
     snapshot_interval = params.get('snapshot_interval', 30.0)
     
+    # ───── NEW: hard memory caps ─────
+    MAX_SNAPSHOTS = params.get('max_snapshots', 100)
+    MAX_HISTORY   = params.get('max_history', 500)
+    snapshot_stride = max(1, int((sim_time / snapshot_interval) / MAX_SNAPSHOTS) + 1)
+    history_stride  = max(1, int((sim_time / sample_interval) / MAX_HISTORY) + 1)
+    
     cfl_factor = params.get('cfl_factor', 0.4)
     adapt_dt_thresh = params.get('adapt_dt_thresh', 600.0)
     adapt_dt_factor = params.get('adapt_dt_factor', 0.8)
