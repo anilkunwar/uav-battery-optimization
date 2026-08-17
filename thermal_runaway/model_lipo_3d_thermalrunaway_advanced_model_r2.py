@@ -767,7 +767,7 @@ def step_3d(T, alphas, dt,
     return T_new, alphas_new
 
 # -----------------------------------------------------------------------------
-# 8.5 Domain Sketch Functions (unchanged)
+# 8.5 Domain Sketch Functions (updated with uirevision)
 # -----------------------------------------------------------------------------
 def plot_initial_domain_sketch(params):
     fig, ax = plt.subplots(figsize=(10, 6))
@@ -903,17 +903,19 @@ def plot_3d_domain_sketch(params):
     m = arrow_len * 1.3
     fig.update_layout(
         scene=dict(
+            uirevision='constant_sketch',  # <--- ADDED
             xaxis=dict(title='x (m)', range=[-m, Lx + m], backgroundcolor='white', gridcolor='#eeeeee'),
             yaxis=dict(title='y (m)', range=[-m, Ly + m], backgroundcolor='white', gridcolor='#eeeeee'),
             zaxis=dict(title='z (m)', range=[-m, Lz + m], backgroundcolor='white', gridcolor='#eeeeee'),
             aspectmode='data'),
+        uirevision='constant_sketch',      # <--- ADDED
         title=dict(text='🔥 3D LiPo Cell Geometry & Boundary Conditions', x=0.5),
         height=700, margin=dict(l=0, r=0, b=0, t=40),
         legend=dict(yanchor='top', y=0.99, xanchor='left', x=0.01))
     return fig
 
 # -----------------------------------------------------------------------------
-# 8.6 Visualization Functions (unchanged – with colorbar support)
+# 8.6 Visualization Functions (with uirevision added)
 # -----------------------------------------------------------------------------
 def create_mesh_aware_3d_thermal(T_3d, extents, style_params, 
                                   show_mesh=True, mesh_opacity=0.3,
@@ -1063,6 +1065,7 @@ def create_mesh_aware_3d_thermal(T_3d, extents, style_params,
         return d
     fig.update_layout(
         scene=dict(
+            uirevision='constant',                     # <--- ADDED
             xaxis=make_axis(axis_template, 'X (m)', [ext_x[0]-margin, ext_x[1]+margin]),
             yaxis=make_axis(axis_template, 'Y (m)', [ext_y[0]-margin, ext_y[1]+margin]),
             zaxis=make_axis(axis_template, 'Z (m)', [ext_z[0]-margin, ext_z[1]+margin]),
@@ -1070,6 +1073,7 @@ def create_mesh_aware_3d_thermal(T_3d, extents, style_params,
             camera=dict(eye=dict(x=1.5, y=1.5, z=0.8)),
             bgcolor=bg_color
         ),
+        uirevision='constant',                         # <--- ADDED
         title=dict(
             text=f'🔥 3D Thermal Field with Mesh | T: {T_min:.1f} - {T_max:.1f} K',
             x=0.5,
@@ -1255,6 +1259,7 @@ def create_multi_slice_3d_visualization(T_3d, extents, style_params,
         return d
     fig.update_layout(
         scene=dict(
+            uirevision='constant',                     # <--- ADDED
             xaxis=make_axis(axis_template, 'X (m)', [ext_x[0]-margin, ext_x[1]+margin]),
             yaxis=make_axis(axis_template, 'Y (m)', [ext_y[0]-margin, ext_y[1]+margin]),
             zaxis=make_axis(axis_template, 'Z (m)', [ext_z[0]-margin, ext_z[1]+margin]),
@@ -1262,6 +1267,7 @@ def create_multi_slice_3d_visualization(T_3d, extents, style_params,
             camera=dict(eye=dict(x=1.5, y=1.5, z=0.8)),
             bgcolor=bg_color
         ),
+        uirevision='constant',                         # <--- ADDED
         title=dict(
             text=f'🔥 Multi-Slice 3D Thermal Field | t = {current_time:.3f} s | T: {T_min:.1f} - {T_max:.1f} K | Mesh: {Nx}×{Ny}×{Nz} | {n_actual_slices} Z-slices',
             x=0.5,
@@ -2099,7 +2105,7 @@ if operation_mode == "Run New Simulation":
         'loc_radius': loc_radius if local_heater else 0,
     }
     fig_3d = plot_3d_domain_sketch(sketch_params)
-    st.plotly_chart(fig_3d, width='stretch')
+    st.plotly_chart(fig_3d, width='stretch', key='domain_sketch_chart')  # <--- ADDED KEY
 
     # Efficiency Monitor
     if 'last_efficiency' in st.session_state:
@@ -2267,11 +2273,11 @@ if operation_mode == "Run New Simulation":
                         show_cross_slices=show_cross,
                         current_time=current_time
                     )
-                    st.plotly_chart(fig_ms, width='stretch')
+                    st.plotly_chart(fig_ms, width='stretch', key='multi_slice_chart')  # <--- ADDED KEY
 
                     ts_fig = create_time_series_with_marker(sim_data, current_time, advanced_styling)
                     if ts_fig:
-                        st.plotly_chart(ts_fig, width='stretch')
+                        st.plotly_chart(ts_fig, width='stretch', key='time_series_chart')  # <--- ADDED KEY
 
                 else:
                     st.warning("This simulation has no 3D snapshots. Re‑run with snapshot storage enabled.")
@@ -2281,7 +2287,7 @@ if operation_mode == "Run New Simulation":
                         show_cross_slices=False,
                         current_time=sim_data['metadata']['final_time']
                     )
-                    st.plotly_chart(fig_ms, width='stretch')
+                    st.plotly_chart(fig_ms, width='stretch', key='multi_slice_chart')  # <--- ADDED KEY
 
             with tabs[1]:
                 col1, col2 = st.columns(2)
@@ -2298,7 +2304,7 @@ if operation_mode == "Run New Simulation":
                     slice_axis=slice_axis,
                     slice_position=slice_pos
                 )
-                st.plotly_chart(fig_sw, width='stretch')
+                st.plotly_chart(fig_sw, width='stretch', key='single_slice_chart')  # <--- ADDED KEY
 
             with tabs[2]:
                 st.markdown("*Smooth isosurfaces – hides mesh.*")
@@ -2338,7 +2344,7 @@ if operation_mode == "Run New Simulation":
                     title=dict(text=f'🔥 Isosurfaces (Smooth) | Range: {lo:.0f}–{hi:.0f} K', x=0.5),
                     height=700
                 )
-                st.plotly_chart(fig_iso, width='stretch')
+                st.plotly_chart(fig_iso, width='stretch', key='isosurface_chart')  # <--- ADDED KEY
 
             with tabs[3]:
                 st.markdown("**2D mid‑Z heatmap with cell edges.**")
@@ -2394,7 +2400,7 @@ if operation_mode == "Run New Simulation":
                 }],
                 width=800, height=600
             )
-            st.plotly_chart(fig_slider, width='stretch')
+            st.plotly_chart(fig_slider, width='stretch', key='2d_heatmap_slider')  # <--- ADDED KEY
 
 else:
     st.header("🔬 Multi‑Simulation Comparison")
@@ -2677,4 +2683,3 @@ with st.expander("🔬 Theoretical Soundness & Advanced Analysis (v3.5.0)", expa
     """)
 
 st.caption("🔥 Multi‑Simulation Thermal Runaway Platform • v3.5.0 • Drone Battery Models • Auto‑scaled physics • Custom color‑bar")
-
