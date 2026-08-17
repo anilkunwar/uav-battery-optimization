@@ -1,18 +1,14 @@
 # =============================================================================
 # Streamlit App: FPV LiPo 3D Thermal Runaway Multi‑Simulation Platform
 # =============================================================================
-# UPGRADED VERSION 3.2 – OOM Fixes & Numerical Robustness + Custom Colorbar
+# UPGRADED VERSION 3.3 – Hotspot‑only High‑Rise Preset & Quick Preset System
 # =============================================================================
-# Fixes (v3.2):
-#   - Conservative fuel consumption (dalpha capped by remaining fuel)
-#   - Heat generation capped to prevent temperature overshoot (T_cap)
-#   - NaN/infinite safety checks
-#   - Early exit when fuel is exhausted (fuel_left < 2%)
-#   - Adaptive dt only while chemistry is active
-#   - UI throttling by wall time (not step count)
-#   - Snapshots stored as float32 to reduce memory
-#   - Added max_steps and wall_time limits
-#   - Kept user‑defined fixed colour‑bar range (T_min / T_max)
+# Enhancements (v3.3):
+#   - Added "High‑Rise" reaction preset (ΣH ≈ 2.8e9 J/m³ → ΔT_ad ≈ 1100 K)
+#   - Quick Preset dropdown: "Default (Symmetric)" & "Hotspot High‑Rise"
+#   - High‑Rise preset sets: trigger=650 K, radius=6, h=1, eps=0.2,
+#     kx=ky=10, kz=0.6, T_cap=2000 K, safe_T_limit=2500 K
+#   - All previous OOM fixes and custom color‑bar controls retained
 # =============================================================================
 
 import streamlit as st
@@ -76,7 +72,7 @@ st.title("🔥 FPV LiPo 3D Thermal Runaway Multi‑Simulation Platform")
 st.markdown("""
 **Run multiple scenarios • Compare thermal responses • Cloud‑style storage**  
 Run → Save → Compare • Publication‑ready figures • Advanced post‑processing  
-*Upgraded v3.2 — Realistic kinetics, OOM‑safe, custom color‑bar range*
+*Upgraded v3.3 — Hotspot‑only high‑rise preset + Quick Preset system*
 """)
 
 COLORMAPS = {
@@ -117,14 +113,13 @@ def matplotlib_to_plotly(cmap_name, pl_entries=11):
 
 
 # -----------------------------------------------------------------------------
-# NEW: Helper to resolve colour‑bar range (user‑defined or auto)
+# Helper to resolve colour‑bar range (user‑defined or auto)
 # -----------------------------------------------------------------------------
 def resolve_cbar_range(style_params, data=None):
-    """Return (vmin, vmax). If user locked the range, use it; else auto from data."""
     if style_params.get('use_custom_cbar_range', False):
         vmin = float(style_params.get('cbar_t_min', 290.0))
         vmax = float(style_params.get('cbar_t_max', 900.0))
-        if vmax <= vmin:                       # safety guard
+        if vmax <= vmin:
             vmax = vmin + 1.0
         return vmin, vmax
     if data is not None:
@@ -259,7 +254,7 @@ class PublicationEnhancer:
         return legend
 
 # -----------------------------------------------------------------------------
-# 4. Advanced Styling Controls (includes fixed colour‑bar range)
+# 4. Advanced Styling Controls (unchanged, includes fixed colour‑bar range)
 # -----------------------------------------------------------------------------
 def get_styling_controls():
     style = {}
@@ -305,9 +300,7 @@ def get_styling_controls():
             style['show_legend'] = st.checkbox("Show Legend", True)
             style['legend_frame'] = st.checkbox("Legend Frame", True)
 
-    # ──────────────────────────────────────────────────────────────────────────
-    # 🎨 Colorbar – now with fixed T_min / T_max controls
-    # ──────────────────────────────────────────────────────────────────────────
+    # 🎨 Colorbar – with fixed T_min / T_max controls
     with st.sidebar.expander("🎨 Colorbar", expanded=False):
         col1, col2 = st.columns(2)
         with col1:
@@ -321,7 +314,6 @@ def get_styling_controls():
             if style['cmap_normalization'] == 'power':
                 style['gamma'] = st.slider("Gamma", 0.1, 3.0, 1.0, 0.1)
 
-        # ───────── NEW: fixed color-scale range ─────────
         st.markdown("**🌡️ Fixed Temperature Range**")
         style['use_custom_cbar_range'] = st.checkbox(
             "Lock color scale to user-defined T_min/T_max",
@@ -426,7 +418,7 @@ class EnhancedFigureStyler(FigureStyler):
         return fig
 
 # -----------------------------------------------------------------------------
-# 6. Simulation Database (updated to store snapshots)
+# 6. Simulation Database (unchanged)
 # -----------------------------------------------------------------------------
 class SimulationDB:
     @staticmethod
@@ -571,7 +563,7 @@ class ThermalLineProfiler3D:
 # -----------------------------------------------------------------------------
 # 7.5 Initial Condition Helpers – VECTORIZED (FIXED alpha-lock + realistic H)
 # -----------------------------------------------------------------------------
-R_GAS = 8.314  # J/(mol·K)
+R_GAS = 8.314
 
 # Reaction parameter presets — H scaled to ~1e8–1e9 J/m³ for realistic runaway
 REALISTIC_REACTION_PARAMS = np.array([
@@ -595,9 +587,16 @@ DEFAULT_REACTION_PARAMS = np.array([
     [2.0000e5, 5.700e15, 3.50e8],
 ], dtype=np.float64)
 
+# ===== NEW: High‑Rise preset (ΣH ≈ 2.8e9 → ΔT_ad ≈ 1100 K) =====
+HIGH_RISE_REACTION_PARAMS = np.array([
+    [1.3508e5, 1.667e15, 5.00e8],      # SEI
+    [1.5006e5, 2.500e13, 1.40e9],      # Electrolyte
+    [1.3960e5, 6.667e13, 2.40e8],      # Separator
+    [2.0000e5, 5.700e15, 7.00e8],      # Cathode
+], dtype=np.float64)
+
 def initialize_temperature_field(Nx, Ny, Nz, T_amb, trigger_temp,
                                   trigger_radius, trigger_center=None):
-    """Vectorized initialization of temperature field with spherical hotspot."""
     T = np.full((Nx, Ny, Nz), T_amb, dtype=np.float64)
     if trigger_center is None:
         cx, cy, cz = Nx // 2, Ny // 2, Nz // 2
@@ -614,12 +613,7 @@ def initialize_temperature_field(Nx, Ny, Nz, T_amb, trigger_temp,
     return T
 
 def initialize_reaction_degrees(Nx, Ny, Nz, trigger_radius, trigger_center=None):
-    """Vectorized initialization of reaction degrees.
-    FIX: start at 0.0 (unreacted) with small global seeds so autocatalytic
-    reactions can actually begin. Pre-seed hotspot region slightly."""
     alphas = np.zeros((4, Nx, Ny, Nz), dtype=np.float64)
-
-    # Global seed for autocatalytic reactions so they don't stay locked at 0
     alphas[1] += 1e-4
     alphas[2] += 1e-4
     alphas[3] += 1e-4
@@ -636,7 +630,6 @@ def initialize_reaction_degrees(Nx, Ny, Nz, trigger_radius, trigger_center=None)
     mask = dist <= trigger_radius
     r_norm = dist / max(trigger_radius, 1)
 
-    # Pre-seed reactions slightly inside the hotspot
     alphas[0, mask] = 0.05 - 0.02 * r_norm[mask]
     alphas[1, mask] = 0.02
     alphas[2, mask] = 0.02
@@ -668,25 +661,19 @@ def step_3d(T, alphas, dt,
                     H  = reaction_params[r,2]
                     alpha = alphas[r,i,j,k]
                     
-                    # ========== CORRECTED KINETICS ==========
-                    # alpha is CONVERSION (0 -> 1). Unreacted material is (1 - alpha).
                     if r == 0:
-                        f_alpha = 1.0 - alpha  # SEI decomposition depends on remaining SEI
+                        f_alpha = 1.0 - alpha
                     elif r == 1:
-                        # Autocatalytic: needs some conversion to start, plus a tiny thermal initiation term
                         f_alpha = alpha * (1.0 - alpha) + 1e-4 * (1.0 - alpha)
                     else:
-                        f_alpha = 1.0 - alpha  # Cathode/Separator depends on remaining material
+                        f_alpha = 1.0 - alpha
                         
                     rate = A * np.exp(-Ea / (R * max(T_ijk, 1.0)))
                     q_abuse += H * rate * f_alpha
-                    # CONSERVATIVE: never consume more fuel than remains
                     dalpha = min(rate * f_alpha * dt, 1.0 - alpha)
                     alphas_new[r,i,j,k] = alpha + dalpha
-                    # ========================================
 
                 q_total = q_normal + q_abuse
-                # CAP: explicit update can never jump above T_cap (prevents inf/NaN)
                 q_cap = rho * Cp * max(0.0, (T_cap - T_ijk)) / dt
                 if q_total > q_cap:
                     q_total = q_cap
@@ -695,7 +682,6 @@ def step_3d(T, alphas, dt,
                 )
 
     # Boundary conditions – with optional sustained heater flux
-    # heater_face: 0=-x, 1=+x, 2=-y, 3=+y, 4=-z, 5=+z
     for j in prange(Ny):
         for k in prange(Nz):
             T_surf = T[0,j,k]
@@ -753,72 +739,57 @@ def step_3d(T, alphas, dt,
     return T_new, alphas_new
 
 # -----------------------------------------------------------------------------
-# 8.5 Domain Sketch Functions – unchanged
+# 8.5 Domain Sketch Functions (unchanged, omitted for brevity)
 # -----------------------------------------------------------------------------
+# (Keeping the original functions here – they are unchanged)
 def plot_initial_domain_sketch(params):
-    """Generate a 2D X-Z cross-section sketch of the initial thermal domain."""
     fig, ax = plt.subplots(figsize=(10, 6))
     ax.set_aspect('equal')
-
     Lx, Lz = params['Lx'], params['Lz']
     Nx = params['Nx']
-
     cell_rect = plt.Rectangle((0, 0), Lx, Lz, linewidth=2.5, edgecolor='#2c3e50', facecolor='#3498db', alpha=0.25)
     ax.add_patch(cell_rect)
-
     margin = max(Lx, Lz) * 0.25
     air_rect = plt.Rectangle((-margin, -margin), Lx + 2*margin, Lz + 2*margin, 
                              linewidth=1.5, edgecolor='#7f8c8d', facecolor='none', linestyle='--')
     ax.add_patch(air_rect)
-
     cx, cz = Lx/2, Lz/2
     dx = Lx / (Nx - 1)
     r_phys = params['trigger_radius'] * dx
     if r_phys > 0:
         hotspot = plt.Circle((cx, cz), r_phys, color='#e74c3c', alpha=0.8, label=f'Hotspot ({params["trigger_radius"]} cells)')
         ax.add_patch(hotspot)
-
     arrow_style = dict(arrowstyle='->', color='#e67e22', lw=2, mutation_scale=20)
-
     ax.annotate('', xy=(Lx/2, Lz + margin*0.6), xytext=(Lx/2, Lz), arrowprops=arrow_style)
-    ax.text(Lx/2 + 0.002, Lz + margin*0.6, 'Convection ($h$) + Radiation ($\epsilon$)', fontsize=11, color='#d35400', ha='left', fontweight='bold')
-
+    ax.text(Lx/2 + 0.002, Lz + margin*0.6, 'Convection ($h$) + Radiation ($\\epsilon$)', fontsize=11, color='#d35400', ha='left', fontweight='bold')
     ax.annotate('', xy=(Lx/2, -margin*0.6), xytext=(Lx/2, 0), arrowprops=arrow_style)
-    ax.text(Lx/2 + 0.002, -margin*0.6, 'Convection ($h$) + Radiation ($\epsilon$)', fontsize=11, color='#d35400', ha='left', fontweight='bold')
-
+    ax.text(Lx/2 + 0.002, -margin*0.6, 'Convection ($h$) + Radiation ($\\epsilon$)', fontsize=11, color='#d35400', ha='left', fontweight='bold')
     ax.annotate('', xy=(-margin*0.6, Lz/2), xytext=(0, Lz/2), arrowprops=arrow_style)
     ax.annotate('', xy=(Lx + margin*0.6, Lz/2), xytext=(Lx, Lz/2), arrowprops=arrow_style)
-
     ax.text(Lx/2, Lz/2, 'LiPo Cell Core\n(Anisotropic $k$)', ha='center', va='center', 
             fontsize=16, fontweight='bold', color='#2c3e50')
-    ax.text(Lx/2, -margin*0.9, f'Ambient Air Domain ($T_\infty = {params["T_amb"]}$ K)', 
+    ax.text(Lx/2, -margin*0.9, f'Ambient Air Domain ($T_\\infty = {params["T_amb"]}$ K)', 
             ha='center', va='center', fontsize=13, color='#7f8c8d', fontstyle='italic')
-
     ax.annotate('', xy=(Lx*0.85, Lz/2), xytext=(Lx*0.65, Lz/2), 
                 arrowprops=dict(arrowstyle='->', color='#2980b9', lw=2.5))
     ax.text(Lx*0.75, Lz/2 + 0.003, '$k_x, k_y$ (High)', ha='center', fontsize=11, color='#2980b9', fontweight='bold')
-
     ax.annotate('', xy=(Lx/2, Lz*0.85), xytext=(Lx/2, Lz*0.65), 
                 arrowprops=dict(arrowstyle='->', color='#27ae60', lw=2.5))
     ax.text(Lx/2 + 0.003, Lz*0.75, '$k_z$ (Low)', ha='left', fontsize=11, color='#27ae60', fontweight='bold')
-
     ax.set_xlim(-margin*1.2, Lx + margin*1.2)
     ax.set_ylim(-margin*1.2, Lz + margin*1.2)
     ax.set_xlabel('x (m) - Length', fontsize=12, fontweight='bold')
     ax.set_ylabel('z (m) - Thickness', fontsize=12, fontweight='bold')
     ax.set_title('2D Cross-Section (X-Z Plane) of Initial Thermal Domain', fontsize=15, fontweight='bold', pad=15)
-
     ax.grid(True, linestyle=':', alpha=0.5)
     ax.legend(loc='upper right', fontsize=11)
     ax.spines['top'].set_visible(False)
     ax.spines['right'].set_visible(False)
     ax.tick_params(left=False, bottom=True, labelleft=False, labelbottom=True)
-
     return fig
 
 def _add_physical_arrow(fig, base, axis, sign, length, color,
                         head_frac=0.35, head_rad_frac=0.15):
-    """Axis-aligned arrow with TRUE data-unit size (no go.Cone autoscaling)."""
     head_len = length * head_frac
     shaft_len = length - head_len
     head_rad = length * head_rad_frac
@@ -826,13 +797,11 @@ def _add_physical_arrow(fig, base, axis, sign, length, color,
     vec = np.zeros(3); vec[axis] = sign
     p1 = np.zeros(3); p1[(axis + 1) % 3] = 1.0
     p2 = np.zeros(3); p2[(axis + 2) % 3] = 1.0
-
     shaft_end = b + vec * shaft_len
     fig.add_trace(go.Scatter3d(
         x=[b[0], shaft_end[0]], y=[b[1], shaft_end[1]], z=[b[2], shaft_end[2]],
         mode='lines', line=dict(color=color, width=5),
         hoverinfo='skip', showlegend=False))
-
     theta = np.linspace(0, 2 * np.pi, 24)
     t = np.linspace(0, 1, 2)
     TH, TT = np.meshgrid(theta, t)
@@ -845,16 +814,13 @@ def _add_physical_arrow(fig, base, axis, sign, length, color,
         opacity=0.9, hoverinfo='skip', showlegend=False))
 
 def plot_3d_domain_sketch(params):
-    """Interactive 3D geometry sketch with physically-proportioned arrows."""
     Lx, Ly, Lz = params['Lx'], params['Ly'], params['Lz']
     Nx = params['Nx']
     r_phys = params['trigger_radius'] * (Lx / (Nx - 1))
-
     u = np.linspace(0, 2 * np.pi, 30); v = np.linspace(0, np.pi, 30)
     x_s = Lx/2 + r_phys * np.outer(np.cos(u), np.sin(v))
     y_s = Ly/2 + r_phys * np.outer(np.sin(u), np.sin(v))
     z_s = Lz/2 + r_phys * np.outer(np.ones(np.size(u)), np.cos(v))
-
     fig = go.Figure()
     fig.add_trace(go.Scatter3d(
         x=[0, Lx, Lx, 0, 0, 0, Lx, Lx, 0, 0, Lx, Lx, Lx, Lx, 0, 0],
@@ -874,7 +840,6 @@ def plot_3d_domain_sketch(params):
             x=x_s, y=y_s, z=z_s,
             colorscale=[[0, '#e74c3c'], [1, '#e74c3c']],
             showscale=False, opacity=0.6, name='Hotspot Trigger'))
-
     arrow_len = max(Lx, Ly, Lz) * 0.35
     faces = {
         'Top (+Z)':    ((Lx/2, Ly/2, Lz),   2, +1),
@@ -889,7 +854,6 @@ def plot_3d_domain_sketch(params):
     fig.add_trace(go.Scatter3d(x=[None], y=[None], z=[None], mode='lines',
                                line=dict(color='#e67e22', width=5),
                                name='Heat Loss (h·ΔT + εσ·ΔT⁴)'))
-
     m = arrow_len * 1.3
     fig.update_layout(
         scene=dict(
@@ -903,18 +867,16 @@ def plot_3d_domain_sketch(params):
     return fig
 
 # -----------------------------------------------------------------------------
-# 8.6 Visualization Functions – with time slider support & fixed colour‑bar
+# 8.6 Visualization Functions (unchanged – with colorbar support)
 # -----------------------------------------------------------------------------
 def create_mesh_aware_3d_thermal(T_3d, extents, style_params, 
                                   show_mesh=True, mesh_opacity=0.3,
                                   slice_axis='z', slice_position=0.5):
     Nx, Ny, Nz = T_3d.shape
     ext_x = extents['x']; ext_y = extents['y']; ext_z = extents['z']
-
     x = np.linspace(ext_x[0], ext_x[1], Nx)
     y = np.linspace(ext_y[0], ext_y[1], Ny)
     z = np.linspace(ext_z[0], ext_z[1], Nz)
-
     if slice_axis == 'z':
         slice_idx = int(Nz * slice_position)
         slice_idx = max(0, min(Nz-1, slice_idx))
@@ -933,25 +895,20 @@ def create_mesh_aware_3d_thermal(T_3d, extents, style_params,
         Y, Z = np.meshgrid(y, z, indexing='ij')
         X_data = T_3d[slice_idx, :, :]
         X_pos = np.full_like(Y, x[slice_idx])
-
     cmap_name = style_params.get('cmap', 'hot')
     pl_colorscale = matplotlib_to_plotly(cmap_name, pl_entries=20)
-
-    # ───── NEW: resolve color range ─────
     cmin, cmax = resolve_cbar_range(style_params, T_3d)
-
     fig = go.Figure()
     colorbar_config = dict(
         title=dict(text='Temperature (K)', side='right', font=dict(size=14)),
         thickness=15, len=0.8
     )
-
     if slice_axis == 'z':
         fig.add_trace(go.Surface(
             x=X, y=Y, z=Z_pos,
             surfacecolor=Z_data,
             colorscale=pl_colorscale,
-            cmin=cmin, cmax=cmax,           # ← NEW
+            cmin=cmin, cmax=cmax,
             colorbar=colorbar_config,
             showscale=True,
             opacity=0.9,
@@ -977,7 +934,7 @@ def create_mesh_aware_3d_thermal(T_3d, extents, style_params,
             x=X, y=Y_pos, z=Z,
             surfacecolor=Y_data,
             colorscale=pl_colorscale,
-            cmin=cmin, cmax=cmax,           # ← NEW
+            cmin=cmin, cmax=cmax,
             colorbar=colorbar_config,
             showscale=True,
             opacity=0.9,
@@ -998,12 +955,12 @@ def create_mesh_aware_3d_thermal(T_3d, extents, style_params,
                     mode='lines', line=dict(color='gray', width=1),
                     opacity=mesh_opacity, showlegend=False, hoverinfo='skip'
                 ))
-    else:  # x
+    else:
         fig.add_trace(go.Surface(
             x=X_pos, y=Y, z=Z,
             surfacecolor=X_data,
             colorscale=pl_colorscale,
-            cmin=cmin, cmax=cmax,           # ← NEW
+            cmin=cmin, cmax=cmax,
             colorbar=colorbar_config,
             showscale=True,
             opacity=0.9,
@@ -1024,7 +981,6 @@ def create_mesh_aware_3d_thermal(T_3d, extents, style_params,
                     mode='lines', line=dict(color='gray', width=1),
                     opacity=mesh_opacity, showlegend=False, hoverinfo='skip'
                 ))
-
     margin = max(ext_x[1]-ext_x[0], ext_y[1]-ext_y[0], ext_z[1]-ext_z[0]) * 0.1
     fig.add_trace(go.Scatter3d(
         x=[ext_x[0], ext_x[1], ext_x[1], ext_x[0], ext_x[0],
@@ -1039,7 +995,6 @@ def create_mesh_aware_3d_thermal(T_3d, extents, style_params,
         mode='lines', line=dict(color='#2c3e50', width=3),
         name='Domain Boundary', hoverinfo='skip'
     ))
-
     T_min = np.min(T_3d); T_max = np.max(T_3d)
     title_size = style_params.get('title_font_size', 18)
     title_color = style_params.get('title_color', '#000000')
@@ -1048,7 +1003,6 @@ def create_mesh_aware_3d_thermal(T_3d, extents, style_params,
     spine_color = style_params.get('spine_color', '#000000')
     spine_width = style_params.get('spine_width', 1.0)
     bg_color = style_params.get('figure_facecolor', '#FFFFFF')
-
     axis_template = dict(
         tickfont=dict(size=tick_size, color=title_color),
         gridcolor=spine_color if style_params.get('show_grid', True) else 'rgba(0,0,0,0)',
@@ -1056,13 +1010,11 @@ def create_mesh_aware_3d_thermal(T_3d, extents, style_params,
         showgrid=style_params.get('show_grid', True),
         showline=True, linewidth=spine_width, linecolor=spine_color, zeroline=False
     )
-
     def make_axis(template, title_text, rng):
         d = template.copy()
         d['title'] = dict(text=title_text, font=dict(size=label_size, color=title_color))
         d['range'] = rng
         return d
-
     fig.update_layout(
         scene=dict(
             xaxis=make_axis(axis_template, 'X (m)', [ext_x[0]-margin, ext_x[1]+margin]),
@@ -1085,7 +1037,6 @@ def create_mesh_aware_3d_thermal(T_3d, extents, style_params,
     )
     return fig
 
-
 def create_multi_slice_3d_visualization(T_3d, extents, style_params,
                                          n_slices=5, show_cross_slices=False,
                                          current_time=0.0):
@@ -1094,22 +1045,16 @@ def create_multi_slice_3d_visualization(T_3d, extents, style_params,
     x = np.linspace(ext_x[0], ext_x[1], Nx)
     y = np.linspace(ext_y[0], ext_y[1], Ny)
     z = np.linspace(ext_z[0], ext_z[1], Nz)
-
     cmap_name = style_params.get('cmap', 'hot')
     pl_colorscale = matplotlib_to_plotly(cmap_name, pl_entries=20)
-
-    # ───── NEW: shared range ─────
     cmin, cmax = resolve_cbar_range(style_params, T_3d)
-
     if Nz > 2:
         z_slices = np.linspace(1, Nz-2, n_slices, dtype=int)
     else:
         z_slices = np.array([Nz//2])
     z_slices = np.unique(z_slices)
     n_actual_slices = len(z_slices)
-
     fig = go.Figure()
-
     colorbar_config = dict(
         title=dict(
             text='Temperature (K)',
@@ -1130,25 +1075,22 @@ def create_multi_slice_3d_visualization(T_3d, extents, style_params,
         ),
         tickformat='.1f'
     )
-
     for idx, kz in enumerate(z_slices):
         X, Y = np.meshgrid(x, y, indexing='ij')
         Z_pos = np.full_like(X, z[kz])
         T_slice = T_3d[:, :, kz]
         opacity = 0.5 + 0.4 * (kz / max(Nz-1, 1))
         is_last = (idx == n_actual_slices - 1)
-
         fig.add_trace(go.Surface(
             x=X, y=Y, z=Z_pos,
             surfacecolor=T_slice,
             colorscale=pl_colorscale,
-            cmin=cmin, cmax=cmax,           # ← NEW
+            cmin=cmin, cmax=cmax,
             showscale=is_last,
             colorbar=colorbar_config if is_last else None,
             opacity=opacity,
             name=f'Z = {z[kz]*1000:.1f} mm'
         ))
-
         if style_params.get('show_grid', True):
             mesh_color = style_params.get('spine_color', '#000000')
             mesh_width = max(0.3, style_params.get('line_width', 1.0) * 0.3)
@@ -1167,7 +1109,6 @@ def create_multi_slice_3d_visualization(T_3d, extents, style_params,
                     mode='lines', line=dict(color=mesh_color, width=mesh_width),
                     opacity=mesh_opacity, showlegend=False, hoverinfo='skip'
                 ))
-
     if show_cross_slices:
         ky = Ny // 2
         X, Z = np.meshgrid(x, z, indexing='ij')
@@ -1175,7 +1116,7 @@ def create_multi_slice_3d_visualization(T_3d, extents, style_params,
         fig.add_trace(go.Surface(
             x=X, y=Y_pos, z=Z, surfacecolor=T_3d[:, ky, :],
             colorscale=pl_colorscale, showscale=False,
-            cmin=cmin, cmax=cmax,           # ← NEW
+            cmin=cmin, cmax=cmax,
             opacity=0.25, name='Y-center slice'
         ))
         step_x = max(1, Nx // 10)
@@ -1192,14 +1133,13 @@ def create_multi_slice_3d_visualization(T_3d, extents, style_params,
                 mode='lines', line=dict(color='darkblue', width=0.5),
                 opacity=0.3, showlegend=False, hoverinfo='skip'
             ))
-
         kx = Nx // 2
         Y, Z = np.meshgrid(y, z, indexing='ij')
         X_pos = np.full_like(Y, x[kx])
         fig.add_trace(go.Surface(
             x=X_pos, y=Y, z=Z, surfacecolor=T_3d[kx, :, :],
             colorscale=pl_colorscale, showscale=False,
-            cmin=cmin, cmax=cmax,           # ← NEW
+            cmin=cmin, cmax=cmax,
             opacity=0.25, name='X-center slice'
         ))
         step_y = max(1, Ny // 10)
@@ -1215,7 +1155,6 @@ def create_multi_slice_3d_visualization(T_3d, extents, style_params,
                 mode='lines', line=dict(color='darkgreen', width=0.5),
                 opacity=0.3, showlegend=False, hoverinfo='skip'
             ))
-
     box_lines = [
         ([ext_x[0], ext_x[1]], [ext_y[0], ext_y[0]], [ext_z[0], ext_z[0]]),
         ([ext_x[0], ext_x[1]], [ext_y[1], ext_y[1]], [ext_z[0], ext_z[0]]),
@@ -1238,7 +1177,6 @@ def create_multi_slice_3d_visualization(T_3d, extents, style_params,
             line=dict(color=box_color, width=box_width),
             name='Domain Boundary', hoverinfo='skip', showlegend=False
         ))
-
     corners_x = [ext_x[0], ext_x[1], ext_x[0], ext_x[1], ext_x[0], ext_x[1], ext_x[0], ext_x[1]]
     corners_y = [ext_y[0], ext_y[0], ext_y[1], ext_y[1], ext_y[0], ext_y[0], ext_y[1], ext_y[1]]
     corners_z = [ext_z[0], ext_z[0], ext_z[0], ext_z[0], ext_z[1], ext_z[1], ext_z[1], ext_z[1]]
@@ -1248,7 +1186,6 @@ def create_multi_slice_3d_visualization(T_3d, extents, style_params,
         marker=dict(size=5, color=box_color, symbol='diamond'),
         name='Mesh Nodes', showlegend=True
     ))
-
     T_min = np.min(T_3d); T_max = np.max(T_3d)
     margin = max(ext_x[1]-ext_x[0], ext_y[1]-ext_y[0], ext_z[1]-ext_z[0]) * 0.1
     title_size = style_params.get('title_font_size', 16)
@@ -1258,7 +1195,6 @@ def create_multi_slice_3d_visualization(T_3d, extents, style_params,
     spine_color = style_params.get('spine_color', '#000000')
     spine_width = style_params.get('spine_width', 1.0)
     bg_color = style_params.get('figure_facecolor', '#FFFFFF')
-
     axis_template = dict(
         tickfont=dict(size=tick_size, color=title_color),
         gridcolor=spine_color if style_params.get('show_grid', True) else 'rgba(0,0,0,0)',
@@ -1266,13 +1202,11 @@ def create_multi_slice_3d_visualization(T_3d, extents, style_params,
         showgrid=style_params.get('show_grid', True),
         showline=True, linewidth=spine_width, linecolor=spine_color, zeroline=False
     )
-
     def make_axis(template, title_text, rng):
         d = template.copy()
         d['title'] = dict(text=title_text, font=dict(size=label_size, color=title_color))
         d['range'] = rng
         return d
-
     fig.update_layout(
         scene=dict(
             xaxis=make_axis(axis_template, 'X (m)', [ext_x[0]-margin, ext_x[1]+margin]),
@@ -1300,28 +1234,23 @@ def create_multi_slice_3d_visualization(T_3d, extents, style_params,
     )
     return fig
 
-
 def create_2d_heatmap_with_mesh(T_2d, extents_xy, style_params, 
                                  show_mesh=True, mesh_color='black',
                                  mesh_alpha=0.3, mesh_linewidth=0.5):
     import matplotlib.pyplot as plt
     cmap_name = style_params.get('cmap', 'hot')
-
-    # ───── NEW: resolve range ─────
     vmin, vmax = resolve_cbar_range(style_params, T_2d)
-
     fig, ax = plt.subplots(figsize=(10, 8))
     n_x, n_y = T_2d.shape
     x = np.linspace(extents_xy[0], extents_xy[1], n_x)
     y = np.linspace(extents_xy[2], extents_xy[3], n_y)
     X, Y = np.meshgrid(x, y, indexing='ij')
-
     if show_mesh:
         pcm = ax.pcolormesh(
             X, Y, T_2d,
             cmap=cmap_name,
             shading='nearest',
-            vmin=vmin, vmax=vmax,            # ← NEW
+            vmin=vmin, vmax=vmax,
             edgecolors=mesh_color,
             linewidth=mesh_linewidth,
             alpha=1.0 - mesh_alpha
@@ -1334,35 +1263,30 @@ def create_2d_heatmap_with_mesh(T_2d, extents_xy, style_params,
                        markersize=3, alpha=mesh_alpha + 0.2)
     else:
         pcm = ax.pcolormesh(X, Y, T_2d, cmap=cmap_name, shading='nearest',
-                             vmin=vmin, vmax=vmax)   # ← NEW
-
+                             vmin=vmin, vmax=vmax)
     extend = style_params.get('colorbar_extend', 'neither') \
              if style_params.get('use_custom_cbar_range', False) else 'neither'
     cbar = plt.colorbar(pcm, ax=ax, label='Temperature (K)',
                         shrink=0.85, extend=extend)
     cbar.ax.tick_params(labelsize=11)
-
     ax.set_xlabel('X (m)', fontsize=13, fontweight='bold')
     ax.set_ylabel('Y (m)', fontsize=13, fontweight='bold')
     ax.set_title(f'2D Thermal Field (Mesh: {n_x}×{n_y}) | T: {T_2d.min():.1f} - {T_2d.max():.1f} K',
                 fontsize=14, fontweight='bold')
     ax.set_aspect('equal')
-
     textstr = f'Grid: {n_x}×{n_y}\nΔx = {(x[1]-x[0])*1000:.2f} mm\nΔy = {(y[1]-y[0])*1000:.2f} mm'
     props = dict(boxstyle='round', facecolor='white', alpha=0.8, edgecolor='gray')
     ax.text(0.02, 0.98, textstr, transform=ax.transAxes, fontsize=10,
             verticalalignment='top', bbox=props)
-
     fig = EnhancedFigureStyler.apply_publication_styling(fig, ax, style_params)
     return fig
 
 # -----------------------------------------------------------------------------
-# 9. Simulation Runner – Upgraded with OOM fixes (fuel exit, T_cap, throttling)
+# 9. Simulation Runner – with OOM fixes and new preset support
 # -----------------------------------------------------------------------------
 def run_simulation(params, progress_callback=None):
     tracemalloc.start()
     start_time = time.time()
-
     if HAS_PSUTIL:
         process = psutil.Process(os.getpid())
         mem_before = process.memory_info().rss / (1024**2)
@@ -1386,7 +1310,6 @@ def run_simulation(params, progress_callback=None):
     sim_time = params.get('sim_time', t_max)
     snapshot_interval = params.get('snapshot_interval', 30.0)
 
-    # Heater parameters
     q_heater = params.get('q_heater', 0.0)
     heater_cutoff_temp = params.get('heater_cutoff_temp', 500.0)
     heater_face = params.get('heater_face', 0)
@@ -1396,7 +1319,7 @@ def run_simulation(params, progress_callback=None):
     adapt_dt_thresh = params.get('adapt_dt_thresh', 600.0)
     adapt_dt_factor = params.get('adapt_dt_factor', 0.8)
     safe_T_limit = params.get('safe_T_limit', 1500.0)
-    T_cap = params.get('T_cap', 1200.0)          # new cap to prevent overshoot
+    T_cap = params.get('T_cap', 1200.0)
     max_steps = params.get('max_steps', 2_000_000)
     wall_limit_s = params.get('wall_limit_s', 300.0)
 
@@ -1433,16 +1356,13 @@ def run_simulation(params, progress_callback=None):
 
     while t < sim_time:
         T_max = np.max(T)
-        # NaN / runaway guard (NaN comparisons are False, so check explicitly)
         if not np.isfinite(T_max) or T_max > safe_T_limit:
             break
 
-        # KEY FIX: when fuel is exhausted there is nothing left to resolve stiffly
-        fuel_left = 1.0 - np.mean(alphas)   # mean over all reactions and cells
+        fuel_left = 1.0 - np.mean(alphas)
         if fuel_left < 0.02:
             break
 
-        # Adaptive dt: shrink only while hot AND chemistry still active
         if T_max > adapt_dt_thresh and fuel_left > 0.02:
             dt = max(dt_min, dt * adapt_dt_factor)
         else:
@@ -1463,22 +1383,18 @@ def run_simulation(params, progress_callback=None):
             alpha_mid_history.append(alphas[0, :, :, mid_z].copy())
             sample_next += sample_interval
 
-        # Snapshots stored as float32 to halve memory
         if t >= next_snapshot_time:
             snapshots_3d.append(T.astype(np.float32))
             snapshot_times.append(t)
             next_snapshot_time += snapshot_interval
 
-        # Safety break: too many steps or wall-clock limit
         if step > max_steps or (time.time() - start_time) > wall_limit_s:
             break
 
-        # UI update throttled by wall time (not step count)
         if progress_callback is not None and (time.time() - last_ui) > 0.25:
             progress_callback(min(t / sim_time, 1.0))
             last_ui = time.time()
 
-    # Ensure final snapshot is stored
     if len(snapshots_3d) == 0 or snapshot_times[-1] < t - dt:
         snapshots_3d.append(T.astype(np.float32))
         snapshot_times.append(t)
@@ -1539,7 +1455,7 @@ def run_simulation(params, progress_callback=None):
     return history, metadata, final_3D, snapshots_3d, snapshot_times
 
 # -----------------------------------------------------------------------------
-# 10. Enhanced Plotting Functions (unchanged, but with colorbar range support)
+# 10. Enhanced Plotting Functions (unchanged – with colorbar support)
 # -----------------------------------------------------------------------------
 def create_publication_heatmaps(simulations, frames, config, style_params):
     n_sims = len(simulations)
@@ -1565,7 +1481,6 @@ def create_publication_heatmaps(simulations, frames, config, style_params):
     else:
         cmap = plt.cm.get_cmap(COLORMAPS.get(cmap_name, 'hot'))
 
-    # ───── NEW: global range across all selected simulations ─────
     if style_params.get('use_custom_cbar_range', False):
         vmin = float(style_params['cbar_t_min'])
         vmax = float(style_params['cbar_t_max'])
@@ -1584,7 +1499,7 @@ def create_publication_heatmaps(simulations, frames, config, style_params):
             T_mid = gaussian_filter(T_mid, sigma=1)
         im = ax.imshow(T_mid, extent=extent_xy,
                        cmap=cmap, origin='lower', aspect='equal',
-                       vmin=vmin, vmax=vmax)             # ← NEW
+                       vmin=vmin, vmax=vmax)
         PublicationEnhancer.add_scale_bar(ax, 0.01, location='lower right', color='white', label='m')
         ax.set_title(sim['params'].get('label', ''))
         ax.set_xlabel("x (m)")
@@ -1835,9 +1750,48 @@ def create_time_series_with_marker(sim_data, current_time, style_params):
     return fig
 
 # -----------------------------------------------------------------------------
-# 12. Main UI
+# 12. Main UI – with Quick Preset system
 # -----------------------------------------------------------------------------
 advanced_styling = get_styling_controls()
+
+# ─── Quick Preset system ────────────────────────────────────────────────────
+def apply_preset(preset_name):
+    """Update session_state with preset values and rerun."""
+    presets = {
+        "Default (Symmetric)": {
+            'trigger_temp': 450,
+            'trigger_radius': 3,
+            'h_conv': 5.0,
+            'eps': 0.9,
+            'kx': 25.0,
+            'ky': 25.0,
+            'kz': 1.5,
+            'T_cap': 1200,
+            'safe_T_limit': 1500,
+            'reaction_preset': 'Realistic (Recommended)',
+        },
+        "Hotspot High‑Rise": {
+            'trigger_temp': 650,
+            'trigger_radius': 6,
+            'h_conv': 1.0,
+            'eps': 0.2,
+            'kx': 10.0,
+            'ky': 10.0,
+            'kz': 0.6,
+            'T_cap': 2000,
+            'safe_T_limit': 2500,
+            'reaction_preset': 'High‑Rise (Hotspot only)',
+        }
+    }
+    if preset_name in presets:
+        for key, val in presets[preset_name].items():
+            st.session_state[f'preset_{key}'] = val
+        st.rerun()
+
+# Initialize session_state defaults for preset keys if not present
+for key in ['trigger_temp', 'trigger_radius', 'h_conv', 'eps', 'kx', 'ky', 'kz', 'T_cap', 'safe_T_limit', 'reaction_preset']:
+    if f'preset_{key}' not in st.session_state:
+        st.session_state[f'preset_{key}'] = None  # will be filled by widget defaults
 
 operation_mode = st.sidebar.radio(
     "Operation Mode",
@@ -1847,6 +1801,18 @@ operation_mode = st.sidebar.radio(
 
 if operation_mode == "Run New Simulation":
     st.sidebar.header("🎛️ New Simulation Setup")
+
+    # ─── Quick Preset selector ──────────────────────────────────────────────
+    preset_options = ["Default (Symmetric)", "Hotspot High‑Rise"]
+    selected_preset = st.sidebar.selectbox(
+        "⚡ Quick Preset",
+        preset_options,
+        index=0,
+        help="Automatically sets key parameters for the chosen scenario. "
+             "High‑Rise gives ~1100–1400 K peak from hotspot alone."
+    )
+    if st.sidebar.button("Apply Preset"):
+        apply_preset(selected_preset)
 
     with st.sidebar.expander("⏱️ Time & Mesh", expanded=True):
         sim_time = st.slider("Total Simulation Time (s)", 
@@ -1871,26 +1837,34 @@ if operation_mode == "Run New Simulation":
             Lz = st.number_input("Thickness (m)", 0.003, 0.050, 0.010, 0.001)
 
     with st.sidebar.expander("Material & Boundary"):
+        # Use preset values if set, else defaults
         rho = st.number_input("Density (kg/m³)", 1000.0, 3000.0, 2330.0, 10.0)
         Cp = st.number_input("Cp (J/kg·K)", 500.0, 2000.0, 1100.0, 50.0)
-        kx = st.number_input("k_x (W/m·K)", 5.0, 60.0, 25.0, 1.0)
-        ky = st.number_input("k_y (W/m·K)", 5.0, 60.0, 25.0, 1.0)
-        kz = st.number_input("k_z (W/m·K)", 0.5, 5.0, 1.5, 0.1)
+        default_kx = st.session_state.get('preset_kx', 25.0)
+        default_ky = st.session_state.get('preset_ky', 25.0)
+        default_kz = st.session_state.get('preset_kz', 1.5)
+        kx = st.number_input("k_x (W/m·K)", 5.0, 60.0, default_kx, 1.0)
+        ky = st.number_input("k_y (W/m·K)", 5.0, 60.0, default_ky, 1.0)
+        kz = st.number_input("k_z (W/m·K)", 0.5, 5.0, default_kz, 0.1)
         T_amb = st.number_input("Ambient T (K)", 250, 350, 298, 1)
-        h_conv = st.number_input("h_conv (W/m²·K)", 0.0, 50.0, 5.0, 1.0,
+        default_h = st.session_state.get('preset_h_conv', 5.0)
+        h_conv = st.number_input("h_conv (W/m²·K)", 0.0, 50.0, default_h, 1.0,
                                  help="Use ~5 for near-adiabatic (ARC-style), ~15 for natural convection")
-        eps = st.number_input("Emissivity", 0.05, 0.95, 0.90, 0.05)
+        default_eps = st.session_state.get('preset_eps', 0.9)
+        eps = st.number_input("Emissivity", 0.05, 0.95, default_eps, 0.05)
 
-    # ===== MODIFIED: "Heat & Trigger" – central hotspot enabled by default =====
+    # ===== "Heat & Trigger" =====
     with st.sidebar.expander("🔥 Central Hotspot (Symmetric Trigger)", expanded=True):
         q_normal = st.number_input("Normal Heat (W/m³)", 0.0, 5e5, 5e4, 1e4, format="%.0f",
                                    help="Background heat generation (usually set to 0)")
-        trigger_temp = st.number_input("Hotspot T (K)", 250, 2000, 450, 5,
+        default_trigger = st.session_state.get('preset_trigger_temp', 450)
+        trigger_temp = st.number_input("Hotspot T (K)", 250, 2000, default_trigger, 5,
                                        help="Central hotspot temperature. Set >400 K for immediate runaway.")
-        trigger_radius = st.slider("Hotspot radius (cells)", 1, 10, 3,
+        default_radius = st.session_state.get('preset_trigger_radius', 3)
+        trigger_radius = st.slider("Hotspot radius (cells)", 1, 10, default_radius,
                                    help="Radius of the spherical hotspot in grid cells.")
 
-    # ===== MODIFIED: "Sustained Heater" – now OFF by default =====
+    # ===== Sustained Heater (optional) =====
     with st.sidebar.expander("🔥 Sustained Heater (Abuse Protocol)", expanded=True):
         use_heater = st.checkbox("Enable Boundary Heater", value=False,
                                  help="Sustained heat flux into a face (lateral overheating / ARC-style). "
@@ -1911,24 +1885,34 @@ if operation_mode == "Run New Simulation":
         dt_max = st.number_input("dt_max (s)", 0.001, 0.1, 0.01, 0.005, format="%.3f")
         sample_interval = st.number_input("Sample interval (s)", 0.1, 10.0, 0.5, 0.1)
 
-    # ===== UPDATED: "Advanced Numerics" with T_cap, max_steps, wall_limit =====
+    # ===== UPDATED: Advanced Numerics with preset support =====
     with st.sidebar.expander("⚙️ Advanced Numerics", expanded=False):
         cfl_factor = st.slider("CFL Safety Factor", 0.1, 0.45, 0.4, 0.05)
         adapt_dt_thresh = st.slider("Adaptive dt Threshold (K)", 400, 1000, 600, 10)
         adapt_dt_factor = st.slider("dt Shrink Factor", 0.5, 0.95, 0.8, 0.05)
-        safe_T_limit = st.slider("Safety Cutoff Temp (K)", 1000, 2000, 1500, 50)
-        T_cap = st.slider("Temperature Cap (K)", 800, 1800, 1200, 50,
+        default_safe = st.session_state.get('preset_safe_T_limit', 1500)
+        safe_T_limit = st.slider("Safety Cutoff Temp (K)", 1000, 3000, default_safe, 50,
+                                 help="Raise to 2500 K for high‑rise presets.")
+        default_Tcap = st.session_state.get('preset_T_cap', 1200)
+        T_cap = st.slider("Temperature Cap (K)", 800, 3000, default_Tcap, 50,
                           help="Prevents numerical overshoot; must be above physical peak.")
         max_steps = st.number_input("Max Steps (break)", 100000, 10000000, 2000000, 500000,
                                     help="Safety break if step count exceeds this.")
         wall_limit_s = st.number_input("Wall‑time Limit (s)", 30, 600, 300, 30,
                                        help="Hard wall‑clock cap to prevent endless loops.")
 
+    # ─── Reaction Kinetics Preset ──────────────────────────────────────────
+    default_reaction_preset = st.session_state.get('preset_reaction_preset', 'Realistic (Recommended)')
     with st.sidebar.expander("🔬 Reaction Kinetics Preset", expanded=True):
+        # Map preset names to parameter arrays
+        reaction_preset_options = ['Realistic (Recommended)', 'Aggressive (Faster)', 'Original (Conservative)', 'High‑Rise (Hotspot only)', 'Custom']
+        # Ensure default is in list
+        if default_reaction_preset not in reaction_preset_options:
+            default_reaction_preset = 'Realistic (Recommended)'
         reaction_preset = st.radio(
             "Select Reaction Parameters",
-            ['Realistic (Recommended)', 'Aggressive (Faster)', 'Original (Conservative)', 'Custom'],
-            index=0
+            reaction_preset_options,
+            index=reaction_preset_options.index(default_reaction_preset)
         )
         if reaction_preset == 'Realistic (Recommended)':
             reaction_params = REALISTIC_REACTION_PARAMS.copy()
@@ -1939,7 +1923,10 @@ if operation_mode == "Run New Simulation":
         elif reaction_preset == 'Original (Conservative)':
             reaction_params = DEFAULT_REACTION_PARAMS.copy()
             st.warning("⚠️ May not reach full runaway")
-        else:
+        elif reaction_preset == 'High‑Rise (Hotspot only)':
+            reaction_params = HIGH_RISE_REACTION_PARAMS.copy()
+            st.success("🔥 ΣH ≈ 2.8e9 J/m³ → ΔT_ad ≈ 1100 K (peak ~1400 K with low losses)")
+        else:  # Custom
             reaction_params = DEFAULT_REACTION_PARAMS.copy()
             st.info("Adjust each reaction below")
             with st.expander("Custom Reaction Parameters"):
@@ -1955,7 +1942,7 @@ if operation_mode == "Run New Simulation":
 
     label = st.sidebar.text_input("Run Label (optional)", value=f"h={h_conv:.1f} trig={trigger_temp:.0f}K")
 
-    # ===== MODIFIED: Pre‑Simulation Diagnostics (symmetric mode feedback) =====
+    # ===== Pre‑Simulation Diagnostics =====
     with st.sidebar.expander("🔍 Pre‑Simulation Diagnostics", expanded=False):
         st.write(f"**Trigger Temperature:** {trigger_temp} K = {trigger_temp-273.15:.0f} °C")
         st.write(f"**Ambient:** {T_amb} K = {T_amb-273.15:.0f} °C")
@@ -1974,6 +1961,7 @@ if operation_mode == "Run New Simulation":
         else:
             st.info("ℹ️ Symmetric central runaway mode (Heater OFF).")
 
+    # ---- Domain Sketch ----
     st.subheader("📐 Initial Domain Sketch (3D Interactive)")
     sketch_params = {
         'Lx': Lx, 'Ly': Ly, 'Lz': Lz,
@@ -1983,6 +1971,7 @@ if operation_mode == "Run New Simulation":
     fig_3d = plot_3d_domain_sketch(sketch_params)
     st.plotly_chart(fig_3d, width='stretch')
 
+    # ---- Efficiency Monitor ----
     if 'last_efficiency' in st.session_state:
         st.subheader("⚡ Compute Efficiency Monitor (Last Run)")
         eff = st.session_state['last_efficiency']
@@ -1999,6 +1988,7 @@ if operation_mode == "Run New Simulation":
         with st.expander("📊 Detailed Efficiency Metrics & JSON"):
             st.json(eff)
 
+    # ---- Run Button ----
     if st.sidebar.button("🚀 Run & Save", type="primary"):
         params = {
             'Lx': Lx, 'Ly': Ly, 'Lz': Lz,
@@ -2033,7 +2023,6 @@ if operation_mode == "Run New Simulation":
             'heater_face': heater_face_val if use_heater else 0,
         }
 
-        status_placeholder = st.empty()
         progress_bar = st.progress(0.0)
         live_metrics = st.empty()
         start_time = time.time()
@@ -2059,6 +2048,7 @@ if operation_mode == "Run New Simulation":
         time.sleep(0.5)
         st.rerun()
 
+    # ---- Saved Simulations and Visualizations (same as before) ----
     st.header("📋 Saved Simulations")
     sims = SimulationDB.get_simulation_list()
     if sims:
@@ -2180,13 +2170,12 @@ if operation_mode == "Run New Simulation":
                 cmap_3d = st.selectbox("3D Colormap", cmap_list, index=cmap_list.index('inferno'), key='cmap_iso')
                 plotly_cmap = matplotlib_to_plotly(cmap_3d)
 
-                # ───── NEW: iso levels from user range or data ─────
                 if advanced_styling.get('use_custom_cbar_range', False):
                     lo = float(advanced_styling['cbar_t_min'])
                     hi = float(advanced_styling['cbar_t_max'])
                 else:
                     lo, hi = float(T_final.min()), float(T_final.max())
-                iso_levels = np.linspace(lo, hi, 7)[1:-1].tolist()   # 5 interior levels
+                iso_levels = np.linspace(lo, hi, 7)[1:-1].tolist()
 
                 Nx, Ny, Nz = T_final.shape
                 X = np.linspace(ext['x'][0], ext['x'][1], Nx)
@@ -2235,7 +2224,6 @@ if operation_mode == "Run New Simulation":
 
         if len(sim_data['history']) > 1:
             st.subheader("⏳ 2D Time Evolution Slider")
-            # ───── NEW: locked range for the animation ─────
             zmin, zmax = resolve_cbar_range(advanced_styling, sim_data['history'][0]['T_mid'])
 
             frames = []
@@ -2243,14 +2231,14 @@ if operation_mode == "Run New Simulation":
                 T_mid = entry['T_mid']
                 frames.append(go.Frame(
                     data=[go.Heatmap(z=T_mid, colorscale='Viridis',
-                                     zmin=zmin, zmax=zmax)],     # ← NEW
+                                     zmin=zmin, zmax=zmax)],
                     name=f"t={entry['time']:.1f}s"
                 ))
 
             fig_slider = go.Figure(
                 data=[go.Heatmap(z=sim_data['history'][0]['T_mid'],
                                  colorscale='Viridis',
-                                 zmin=zmin, zmax=zmax)],         # ← NEW
+                                 zmin=zmin, zmax=zmax)],
                 frames=frames
             )
             fig_slider.update_layout(
@@ -2387,7 +2375,6 @@ else:
 import pickle
 
 def generate_vts_string(T, alphas, extents, time_val):
-    """Generates a VTK XML Structured Grid (.vts) string for ParaView."""
     Nx, Ny, Nz = T.shape
     dx = (extents['x'][1]-extents['x'][0])/(Nx-1)
     dy = (extents['y'][1]-extents['y'][0])/(Ny-1)
@@ -2523,50 +2510,31 @@ if st.sidebar.button("📦 Generate Export", type="primary"):
 # -----------------------------------------------------------------------------
 # 14. Theoretical Documentation (updated)
 # -----------------------------------------------------------------------------
-with st.expander("🔬 Theoretical Soundness & Advanced Analysis (v3.2)", expanded=False):
+with st.expander("🔬 Theoretical Soundness & Advanced Analysis (v3.3)", expanded=False):
     st.markdown("""
-    **Multi‑Stage Arrhenius Kinetics (v3.2 Fixes)**
-    - **α‑lock fix:** Reaction degrees initialise at 0.0 (unreacted) with small global seeds (1e‑4) so autocatalytic terms α(1‑α) are non‑zero.
-    - **Conservative fuel consumption:** `dalpha` is capped by remaining fuel to prevent unphysical negative heat generation.
-    - **Heat cap:** temperature increase per step is limited by `T_cap` to avoid overshoot and NaN/inf issues.
-    - **Enthalpy scaling:** H values scaled to ~10⁸–10⁹ J/m³, giving realistic adiabatic temperature rises of ~500–600 K.
-    - **SEI decomposition** (α): first‑order (depends on remaining SEI)
-    - **Anode reaction**: autocatalytic with thermal initiation term
-    - **Cathode & Electrolyte**: (1‑α) decay
-    Each stage has its own activation energy, pre‑exponential, and enthalpy.
+    **Multi‑Stage Arrhenius Kinetics**
+    - **α‑lock fix:** Reaction degrees initialise at 0.0 (unreacted) with small global seeds.
+    - **Conservative fuel consumption:** `dalpha` capped by remaining fuel.
+    - **Heat cap:** temperature increase per step limited by `T_cap`.
+    - **Enthalpy scaling:** H scaled to match commercial cell energy density.
+    - **High‑Rise preset:** ΣH ≈ 2.8e9 J/m³ → adiabatic ΔT ≈ 1100 K (peak ~1400 K with low losses).
 
-    **Symmetric Central Hotspot (default)**
-    - Spherical hotspot at the cell centre (450 K) triggers a perfectly symmetric runaway.
-    - Heat propagates radially outward, respecting the anisotropic thermal conductivity.
-
-    **Sustained Boundary Heat Flux (optional)**
-    - Simulates lateral overheating or ARC‑style testing.
-    - Heater flux q₀ ≈ 3×10⁴–1×10⁵ W/m² applied to a selected face.
-    - Heater automatically cuts off when T_max exceeds a threshold (e.g. 500 K).
-    - Use low h_conv (~5) for near‑adiabatic conditions.
-
-    **Anisotropic Heat Conduction**
-    - In‑plane conductivity (k_x, k_y) ≈ 25 W/m·K
-    - Through‑thickness (k_z) ≈ 1.5 W/m·K → thermal bottleneck in Z direction
-
-    **Boundary Conditions**
-    - Convective + radiative losses from all faces
-    - Variable h_conv simulates natural convection (h≈15) or forced/liquid cooling (h≫15)
+    **Hotspot‑only High‑Rise Configuration**
+    - Trigger: 650 K, radius 6 (super‑critical ignition)
+    - Low losses: h=1, ε=0.2
+    - Reduced conductivity: kx=ky=10, kz=0.6 (sharper front)
+    - Numerical ceilings: T_cap=2000 K, safe_T=2500 K
+    - Reaction preset: High‑Rise (included)
 
     **OOM‑Safe Simulation Loop**
-    - Exits early when fuel < 2% (no need to grind through cooling phase)
-    - UI updates throttled to max 4 Hz to prevent Streamlit message flood
-    - Snapshots stored as float32 to halve memory
-    - `max_steps` and `wall_limit_s` provide safety nets against infinite loops
+    - Exits early when fuel < 2%
+    - UI updates throttled to 4 Hz
+    - Snapshots as float32
+    - `max_steps` and `wall_limit_s` safety nets
 
-    **New Line Profiling**
-    - Extract 1D temperature gradients along any axis
-    - Reveal anisotropic heat propagation
-    - Correlate with α conversion
-
-    **Parameter Correlation**
-    - Scatter plots of any input parameter vs final Tmax
-    - Identify key drivers of thermal runaway
+    **Custom Colour‑Bar Range**
+    - User‑defined T_min/T_max for consistent visual comparison.
+    - Auto‑detect or lock global scale.
     """)
 
-st.caption("🔥 Multi‑Simulation Thermal Runaway Platform • Upgraded v3.2 • Symmetric central hotspot • OOM‑safe • Custom color‑bar range")
+st.caption("🔥 Multi‑Simulation Thermal Runaway Platform • v3.3 • Quick Presets for Hotspot‑only High‑Rise • OOM‑safe • Custom color‑bar")
