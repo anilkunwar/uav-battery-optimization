@@ -37,6 +37,16 @@ Customizable Colorscale Bar:
 
 [![meaningtowords](https://img.shields.io/badge/thermarunawaybattery-v100.e-turquoise)](https://thermal-runaway-lipo3dmodel100e.streamlit.app/) (No OOM, expanded the 7e version, temperature profile is realistic, temporal slider in the 3D visualization, progress bar in simulation v5 will jump to 1-2% almost immediately , fixes CFL timestep , adaptive dt and throttling the UI i.e. Progress callback only shows up every 200 steps, sidebar for variation of these numerical finetuning cfl, progress monitor, 3D rendering, robust postprocessing available in the app ,robust visualization, 3D rendering for visualization of results)
 
+[![meaningtowords](https://img.shields.io/badge/thermarunawaybattery-v500.e-turquoise)](https://thermal-runaway-lipo3dmodel500d.streamlit.app/) (No OOM, expanded the 7e version, temperature profile is realistic, temporal slider in the 3D visualization, progress bar in simulation v5 will jump to 1-2% almost immediately , fixes CFL timestep , adaptive dt and throttling the UI i.e. Progress callback only shows up every 200 steps, sidebar for variation of these numerical finetuning cfl, progress monitor, 3D rendering, robust postprocessing available in the app ,robust visualization, 3D rendering for visualization of results)
+
+[![meaningtowords](https://img.shields.io/badge/thermarunawaybattery-v1000.e-turquoise)](https://thermal-runaway-lipo3dmodel1000d.streamlit.app/) (No OOM, expanded the 7e version, temperature profile is realistic, temporal slider in the 3D visualization, progress bar in simulation v5 will jump to 1-2% almost immediately , fixes CFL timestep , adaptive dt and throttling the UI i.e. Progress callback only shows up every 200 steps, sidebar for variation of these numerical finetuning cfl, progress monitor, 3D rendering, robust postprocessing available in the app ,robust visualization, 3D rendering for visualization of results)
+
+
+Internal Defect (Hotspot Focus):
+
+[![meaningtowords](https://img.shields.io/badge/thermarunawayhotspot-v1.0-orange)](https://thermal-runaway-type1-lipo3d-model1.streamlit.app/) (No OOM, expanded the 7e version, temperature profile is realistic, temporal slider in the 3D visualization, progress bar in simulation v5 will jump to 1-2% almost immediately , fixes CFL timestep , adaptive dt and throttling the UI i.e. Progress callback only shows up every 200 steps, sidebar for variation of these numerical finetuning cfl, progress monitor, 3D rendering, robust postprocessing available in the app ,robust visualization, 3D rendering for visualization of results)
+
+
 
 ## CFD integration in Thermal Simulations after v8
 
