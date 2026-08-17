@@ -1,14 +1,9 @@
 # =============================================================================
 # Streamlit App: FPV LiPo 3D Thermal Runaway Multi‑Simulation Platform
 # =============================================================================
-# UPGRADED VERSION 3.3 – Hotspot‑only High‑Rise Preset & Quick Preset System
+# UPGRADED VERSION 3.3.1 – Fixed preset initialisation (no NoneType errors)
 # =============================================================================
-# Enhancements (v3.3):
-#   - Added "High‑Rise" reaction preset (ΣH ≈ 2.8e9 J/m³ → ΔT_ad ≈ 1100 K)
-#   - Quick Preset dropdown: "Default (Symmetric)" & "Hotspot High‑Rise"
-#   - High‑Rise preset sets: trigger=650 K, radius=6, h=1, eps=0.2,
-#     kx=ky=10, kz=0.6, T_cap=2000 K, safe_T_limit=2500 K
-#   - All previous OOM fixes and custom color‑bar controls retained
+# All features from v3.3 retained; preset keys now always have valid defaults.
 # =============================================================================
 
 import streamlit as st
@@ -72,7 +67,7 @@ st.title("🔥 FPV LiPo 3D Thermal Runaway Multi‑Simulation Platform")
 st.markdown("""
 **Run multiple scenarios • Compare thermal responses • Cloud‑style storage**  
 Run → Save → Compare • Publication‑ready figures • Advanced post‑processing  
-*Upgraded v3.3 — Hotspot‑only high‑rise preset + Quick Preset system*
+*Upgraded v3.3.1 — Hotspot‑only high‑rise preset with robust defaults*
 """)
 
 COLORMAPS = {
@@ -254,7 +249,7 @@ class PublicationEnhancer:
         return legend
 
 # -----------------------------------------------------------------------------
-# 4. Advanced Styling Controls (unchanged, includes fixed colour‑bar range)
+# 4. Advanced Styling Controls (unchanged)
 # -----------------------------------------------------------------------------
 def get_styling_controls():
     style = {}
@@ -587,7 +582,6 @@ DEFAULT_REACTION_PARAMS = np.array([
     [2.0000e5, 5.700e15, 3.50e8],
 ], dtype=np.float64)
 
-# ===== NEW: High‑Rise preset (ΣH ≈ 2.8e9 → ΔT_ad ≈ 1100 K) =====
 HIGH_RISE_REACTION_PARAMS = np.array([
     [1.3508e5, 1.667e15, 5.00e8],      # SEI
     [1.5006e5, 2.500e13, 1.40e9],      # Electrolyte
@@ -1282,7 +1276,7 @@ def create_2d_heatmap_with_mesh(T_2d, extents_xy, style_params,
     return fig
 
 # -----------------------------------------------------------------------------
-# 9. Simulation Runner – with OOM fixes and new preset support
+# 9. Simulation Runner (unchanged – with OOM fixes)
 # -----------------------------------------------------------------------------
 def run_simulation(params, progress_callback=None):
     tracemalloc.start()
@@ -1455,7 +1449,7 @@ def run_simulation(params, progress_callback=None):
     return history, metadata, final_3D, snapshots_3d, snapshot_times
 
 # -----------------------------------------------------------------------------
-# 10. Enhanced Plotting Functions (unchanged – with colorbar support)
+# 10. Enhanced Plotting Functions (unchanged)
 # -----------------------------------------------------------------------------
 def create_publication_heatmaps(simulations, frames, config, style_params):
     n_sims = len(simulations)
@@ -1750,13 +1744,28 @@ def create_time_series_with_marker(sim_data, current_time, style_params):
     return fig
 
 # -----------------------------------------------------------------------------
-# 12. Main UI – with Quick Preset system
+# 12. Main UI – with Quick Preset system (fixed initialisation)
 # -----------------------------------------------------------------------------
 advanced_styling = get_styling_controls()
 
-# ─── Quick Preset system ────────────────────────────────────────────────────
+# ---- Preset system: initialise all preset keys with valid defaults ----
+preset_defaults = {
+    'trigger_temp': 450,
+    'trigger_radius': 3,
+    'h_conv': 5.0,
+    'eps': 0.9,
+    'kx': 25.0,
+    'ky': 25.0,
+    'kz': 1.5,
+    'T_cap': 1200,
+    'safe_T_limit': 1500,
+    'reaction_preset': 'Realistic (Recommended)',
+}
+for key, default in preset_defaults.items():
+    if f'preset_{key}' not in st.session_state:
+        st.session_state[f'preset_{key}'] = default
+
 def apply_preset(preset_name):
-    """Update session_state with preset values and rerun."""
     presets = {
         "Default (Symmetric)": {
             'trigger_temp': 450,
@@ -1788,23 +1797,6 @@ def apply_preset(preset_name):
             st.session_state[f'preset_{key}'] = val
         st.rerun()
 
-# Initialize session_state defaults for preset keys if not present
-preset_defaults = {
-    'trigger_temp': 450,
-    'trigger_radius': 3,
-    'h_conv': 5.0,
-    'eps': 0.9,
-    'kx': 25.0,
-    'ky': 25.0,
-    'kz': 1.5,
-    'T_cap': 1200,
-    'safe_T_limit': 1500,
-    'reaction_preset': 'Realistic (Recommended)'
-}
-for key, default_val in preset_defaults.items():
-    if f'preset_{key}' not in st.session_state:
-        st.session_state[f'preset_{key}'] = default_val
-
 operation_mode = st.sidebar.radio(
     "Operation Mode",
     ["Run New Simulation", "Compare Saved Simulations"],
@@ -1814,7 +1806,7 @@ operation_mode = st.sidebar.radio(
 if operation_mode == "Run New Simulation":
     st.sidebar.header("🎛️ New Simulation Setup")
 
-    # ─── Quick Preset selector ──────────────────────────────────────────────
+    # Quick Preset selector
     preset_options = ["Default (Symmetric)", "Hotspot High‑Rise"]
     selected_preset = st.sidebar.selectbox(
         "⚡ Quick Preset",
@@ -1849,31 +1841,24 @@ if operation_mode == "Run New Simulation":
             Lz = st.number_input("Thickness (m)", 0.003, 0.050, 0.010, 0.001)
 
     with st.sidebar.expander("Material & Boundary"):
-        # Use preset values if set, else defaults
         rho = st.number_input("Density (kg/m³)", 1000.0, 3000.0, 2330.0, 10.0)
         Cp = st.number_input("Cp (J/kg·K)", 500.0, 2000.0, 1100.0, 50.0)
-        default_kx = st.session_state.get('preset_kx', 25.0)
-        default_ky = st.session_state.get('preset_ky', 25.0)
-        default_kz = st.session_state.get('preset_kz', 1.5)
-        kx = st.number_input("k_x (W/m·K)", 5.0, 60.0, default_kx, 1.0)
-        ky = st.number_input("k_y (W/m·K)", 5.0, 60.0, default_ky, 1.0)
-        kz = st.number_input("k_z (W/m·K)", 0.5, 5.0, default_kz, 0.1)
+        # Use preset values from session_state (always valid)
+        kx = st.number_input("k_x (W/m·K)", 5.0, 60.0, st.session_state['preset_kx'], 1.0)
+        ky = st.number_input("k_y (W/m·K)", 5.0, 60.0, st.session_state['preset_ky'], 1.0)
+        kz = st.number_input("k_z (W/m·K)", 0.5, 5.0, st.session_state['preset_kz'], 0.1)
         T_amb = st.number_input("Ambient T (K)", 250, 350, 298, 1)
-        default_h = st.session_state.get('preset_h_conv', 5.0)
-        h_conv = st.number_input("h_conv (W/m²·K)", 0.0, 50.0, default_h, 1.0,
+        h_conv = st.number_input("h_conv (W/m²·K)", 0.0, 50.0, st.session_state['preset_h_conv'], 1.0,
                                  help="Use ~5 for near-adiabatic (ARC-style), ~15 for natural convection")
-        default_eps = st.session_state.get('preset_eps', 0.9)
-        eps = st.number_input("Emissivity", 0.05, 0.95, default_eps, 0.05)
+        eps = st.number_input("Emissivity", 0.05, 0.95, st.session_state['preset_eps'], 0.05)
 
     # ===== "Heat & Trigger" =====
     with st.sidebar.expander("🔥 Central Hotspot (Symmetric Trigger)", expanded=True):
         q_normal = st.number_input("Normal Heat (W/m³)", 0.0, 5e5, 5e4, 1e4, format="%.0f",
                                    help="Background heat generation (usually set to 0)")
-        default_trigger = st.session_state.get('preset_trigger_temp', 450)
-        trigger_temp = st.number_input("Hotspot T (K)", 250, 2000, default_trigger, 5,
+        trigger_temp = st.number_input("Hotspot T (K)", 250, 2000, st.session_state['preset_trigger_temp'], 5,
                                        help="Central hotspot temperature. Set >400 K for immediate runaway.")
-        default_radius = st.session_state.get('preset_trigger_radius', 3)
-        trigger_radius = st.slider("Hotspot radius (cells)", 1, 10, default_radius,
+        trigger_radius = st.slider("Hotspot radius (cells)", 1, 10, st.session_state['preset_trigger_radius'],
                                    help="Radius of the spherical hotspot in grid cells.")
 
     # ===== Sustained Heater (optional) =====
@@ -1897,28 +1882,25 @@ if operation_mode == "Run New Simulation":
         dt_max = st.number_input("dt_max (s)", 0.001, 0.1, 0.01, 0.005, format="%.3f")
         sample_interval = st.number_input("Sample interval (s)", 0.1, 10.0, 0.5, 0.1)
 
-    # ===== UPDATED: Advanced Numerics with preset support =====
+    # Advanced Numerics
     with st.sidebar.expander("⚙️ Advanced Numerics", expanded=False):
         cfl_factor = st.slider("CFL Safety Factor", 0.1, 0.45, 0.4, 0.05)
         adapt_dt_thresh = st.slider("Adaptive dt Threshold (K)", 400, 1000, 600, 10)
         adapt_dt_factor = st.slider("dt Shrink Factor", 0.5, 0.95, 0.8, 0.05)
-        default_safe = st.session_state.get('preset_safe_T_limit', 1500)
-        safe_T_limit = st.slider("Safety Cutoff Temp (K)", 1000, 3000, default_safe, 50,
+        safe_T_limit = st.slider("Safety Cutoff Temp (K)", 1000, 3000, st.session_state['preset_safe_T_limit'], 50,
                                  help="Raise to 2500 K for high‑rise presets.")
-        default_Tcap = st.session_state.get('preset_T_cap', 1200)
-        T_cap = st.slider("Temperature Cap (K)", 800, 3000, default_Tcap, 50,
+        T_cap = st.slider("Temperature Cap (K)", 800, 3000, st.session_state['preset_T_cap'], 50,
                           help="Prevents numerical overshoot; must be above physical peak.")
         max_steps = st.number_input("Max Steps (break)", 100000, 10000000, 2000000, 500000,
                                     help="Safety break if step count exceeds this.")
         wall_limit_s = st.number_input("Wall‑time Limit (s)", 30, 600, 300, 30,
                                        help="Hard wall‑clock cap to prevent endless loops.")
 
-    # ─── Reaction Kinetics Preset ──────────────────────────────────────────
-    default_reaction_preset = st.session_state.get('preset_reaction_preset', 'Realistic (Recommended)')
+    # Reaction Kinetics Preset
+    default_reaction_preset = st.session_state['preset_reaction_preset']
     with st.sidebar.expander("🔬 Reaction Kinetics Preset", expanded=True):
-        # Map preset names to parameter arrays
-        reaction_preset_options = ['Realistic (Recommended)', 'Aggressive (Faster)', 'Original (Conservative)', 'High‑Rise (Hotspot only)', 'Custom']
-        # Ensure default is in list
+        reaction_preset_options = ['Realistic (Recommended)', 'Aggressive (Faster)', 
+                                   'Original (Conservative)', 'High‑Rise (Hotspot only)', 'Custom']
         if default_reaction_preset not in reaction_preset_options:
             default_reaction_preset = 'Realistic (Recommended)'
         reaction_preset = st.radio(
@@ -1952,9 +1934,10 @@ if operation_mode == "Run New Simulation":
                     with c3:
                         reaction_params[i,2] = st.number_input(f"H{i} (W/m³)", value=float(reaction_params[i,2]), key=f'h_{i}')
 
-    label = st.sidebar.text_input("Run Label (optional)", value=f"h={h_conv or 5.0:.1f} trig={trigger_temp or 450:.0f}K")
+    # Label – now safely uses defined variables
+    label = st.sidebar.text_input("Run Label (optional)", value=f"h={h_conv:.1f} trig={trigger_temp:.0f}K")
 
-    # ===== Pre‑Simulation Diagnostics =====
+    # Pre‑Simulation Diagnostics
     with st.sidebar.expander("🔍 Pre‑Simulation Diagnostics", expanded=False):
         st.write(f"**Trigger Temperature:** {trigger_temp} K = {trigger_temp-273.15:.0f} °C")
         st.write(f"**Ambient:** {T_amb} K = {T_amb-273.15:.0f} °C")
@@ -1973,7 +1956,7 @@ if operation_mode == "Run New Simulation":
         else:
             st.info("ℹ️ Symmetric central runaway mode (Heater OFF).")
 
-    # ---- Domain Sketch ----
+    # Domain Sketch
     st.subheader("📐 Initial Domain Sketch (3D Interactive)")
     sketch_params = {
         'Lx': Lx, 'Ly': Ly, 'Lz': Lz,
@@ -1983,7 +1966,7 @@ if operation_mode == "Run New Simulation":
     fig_3d = plot_3d_domain_sketch(sketch_params)
     st.plotly_chart(fig_3d, width='stretch')
 
-    # ---- Efficiency Monitor ----
+    # Efficiency Monitor
     if 'last_efficiency' in st.session_state:
         st.subheader("⚡ Compute Efficiency Monitor (Last Run)")
         eff = st.session_state['last_efficiency']
@@ -2000,7 +1983,7 @@ if operation_mode == "Run New Simulation":
         with st.expander("📊 Detailed Efficiency Metrics & JSON"):
             st.json(eff)
 
-    # ---- Run Button ----
+    # Run Button
     if st.sidebar.button("🚀 Run & Save", type="primary"):
         params = {
             'Lx': Lx, 'Ly': Ly, 'Lz': Lz,
@@ -2060,7 +2043,7 @@ if operation_mode == "Run New Simulation":
         time.sleep(0.5)
         st.rerun()
 
-    # ---- Saved Simulations and Visualizations (same as before) ----
+    # Saved Simulations and visualisation (same as before)
     st.header("📋 Saved Simulations")
     sims = SimulationDB.get_simulation_list()
     if sims:
@@ -2077,7 +2060,7 @@ if operation_mode == "Run New Simulation":
     else:
         st.info("No simulations saved yet.")
 
-    # ───── “Use Global Min/Max” button logic ──────────────────────────
+    # “Use Global Min/Max” button logic
     if advanced_styling.get('cbar_auto_from_global', False) and sims:
         latest_id = sims[-1]['id']
         sim_data = SimulationDB.get_all_simulations()[latest_id]
@@ -2522,7 +2505,7 @@ if st.sidebar.button("📦 Generate Export", type="primary"):
 # -----------------------------------------------------------------------------
 # 14. Theoretical Documentation (updated)
 # -----------------------------------------------------------------------------
-with st.expander("🔬 Theoretical Soundness & Advanced Analysis (v3.3)", expanded=False):
+with st.expander("🔬 Theoretical Soundness & Advanced Analysis (v3.3.1)", expanded=False):
     st.markdown("""
     **Multi‑Stage Arrhenius Kinetics**
     - **α‑lock fix:** Reaction degrees initialise at 0.0 (unreacted) with small global seeds.
@@ -2549,4 +2532,4 @@ with st.expander("🔬 Theoretical Soundness & Advanced Analysis (v3.3)", expand
     - Auto‑detect or lock global scale.
     """)
 
-st.caption("🔥 Multi‑Simulation Thermal Runaway Platform • v3.3 • Quick Presets for Hotspot‑only High‑Rise • OOM‑safe • Custom color‑bar")
+st.caption("🔥 Multi‑Simulation Thermal Runaway Platform • v3.3.1 • Fixed preset initialisation • High‑Rise presets • OOM‑safe • Custom color‑bar")
