@@ -46,6 +46,10 @@ Internal Defect (Hotspot Focus):
 
 [![meaningtowords](https://img.shields.io/badge/thermarunawayhotspot-v1.0-orange)](https://thermal-runaway-type1-lipo3d-model1.streamlit.app/) (No OOM, expanded the 7e version, temperature profile is realistic, temporal slider in the 3D visualization, progress bar in simulation v5 will jump to 1-2% almost immediately , fixes CFL timestep , adaptive dt and throttling the UI i.e. Progress callback only shows up every 200 steps, sidebar for variation of these numerical finetuning cfl, progress monitor, 3D rendering, robust postprocessing available in the app ,robust visualization, 3D rendering for visualization of results)
 
+Internal Short Circuit and Self sustaining Combustion 
+
+[![meaningtowords](https://img.shields.io/badge/thermarunawayhotspot-v2.0-orange)](https://model-lipo3d-thermalrunaway-advancedmodel1.streamlit.app/) (No OOM, expanded the 7e version, temperature profile is realistic, temporal slider in the 3D visualization, progress bar in simulation v5 will jump to 1-2% almost immediately , fixes CFL timestep , adaptive dt and throttling the UI i.e. Progress callback only shows up every 200 steps, sidebar for variation of these numerical finetuning cfl, progress monitor, 3D rendering, robust postprocessing available in the app ,robust visualization, 3D rendering for visualization of results)
+
 
 
 ## CFD integration in Thermal Simulations after v8
