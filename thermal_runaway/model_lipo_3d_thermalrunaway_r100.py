@@ -1386,19 +1386,29 @@ def run_simulation(params, progress_callback=None):
         t += dt; step += 1
         T_max = np.max(T)
         
-        # Sample history
+        # Sample history (capped via dynamic stride)
         if t >= sample_next:
             times.append(t)
             T_max_history.append(T_max)
             T_mid_history.append(T[:, :, mid_z].copy())
             alpha_mid_history.append(alphas[0, :, :, mid_z].copy())
-            sample_next += sample_interval
+            # ───── NEW: if we exceed MAX_HISTORY, compress by dropping every other entry ─────
+            if len(times) >= MAX_HISTORY:
+                times = times[::2]
+                T_max_history = T_max_history[::2]
+                T_mid_history = T_mid_history[::2]
+                alpha_mid_history = alpha_mid_history[::2]
+                sample_interval *= 2.0
+                sample_next = t + sample_interval  # reset to avoid irregular gap
+            else:
+                sample_next += sample_interval
         
-        # Snapshot storage
+        # Snapshot storage (capped & strided, float32 to halve RAM)
         if t >= next_snapshot_time:
-            snapshots_3d.append(T.copy())
-            snapshot_times.append(t)
-            next_snapshot_time += snapshot_interval
+            if len(snapshots_3d) < MAX_SNAPSHOTS:
+                snapshots_3d.append(T.astype(np.float32))
+                snapshot_times.append(t)
+            next_snapshot_time += snapshot_interval * snapshot_stride
         
         # Safety
         if T_max > safe_T_limit or dt < dt_min * 0.5:
@@ -1408,9 +1418,9 @@ def run_simulation(params, progress_callback=None):
         if progress_callback is not None and step % ui_throttle == 0:
             progress_callback(min(t / sim_time, 1.0))
 
-    # Ensure final snapshot is stored
-    if len(snapshots_3d) == 0 or snapshot_times[-1] < t - dt:
-        snapshots_3d.append(T.copy())
+    # Ensure final snapshot is stored (respect cap)
+    if (len(snapshots_3d) == 0 or snapshot_times[-1] < t - dt) and len(snapshots_3d) < MAX_SNAPSHOTS:
+        snapshots_3d.append(T.astype(np.float32))
         snapshot_times.append(t)
 
     # Build history list
@@ -1836,6 +1846,10 @@ if operation_mode == "Run New Simulation":
         adapt_dt_factor = st.slider("dt Shrink Factor", 0.5, 0.95, 0.8, 0.05)
         ui_throttle = st.slider("UI Update Interval (steps)", 10, 1000, 200, 10)
         safe_T_limit = st.slider("Safety Cutoff Temp (K)", 1000, 2000, 1500, 50)
+        max_snapshots = st.slider("Max 3D Snapshots", 10, 300, 100, 10,
+                                  help="Hard cap on stored 3D fields. Excess snapshots are skipped.")
+        max_history = st.slider("Max History Entries", 100, 2000, 500, 50,
+                                help="Hard cap on time-series history. Excess entries are downsampled.")
 
     # ---- Reaction Presets ----
     with st.sidebar.expander("🔬 Reaction Kinetics Preset", expanded=True):
@@ -1881,7 +1895,22 @@ if operation_mode == "Run New Simulation":
         else:
             st.success("✅ Realistic trigger range.")
         st.write(f"**Mesh cells:** {Nx*Ny*Nz:,}")
-        st.write(f"**Snapshots (approx):** {int(sim_time / snapshot_interval)}")
+
+        # ───── NEW: memory budget estimator ─────
+        snap_count = min(int(sim_time / snapshot_interval), max_snapshots)
+        hist_count = min(int(sim_time / sample_interval), max_history)
+        snap_mb   = Nx * Ny * Nz * 4 / (1024**2)   # float32
+        hist_mb   = hist_count * Nx * Ny * 8 / (1024**2)  # float64 T_mid + alpha
+        total_mb  = snap_mb * snap_count + hist_mb + snap_mb * 5  # working arrays
+        st.write(f"**Snapshots stored:** {snap_count} (cap={max_snapshots})")
+        st.write(f"**History entries:** {hist_count} (cap={max_history})")
+        st.write(f"**Estimated peak RAM:** ~{total_mb:.1f} MB")
+        if total_mb > 1024:
+            st.warning(f"⚠️ High memory usage (~{total_mb/1024:.1f} GB). Reduce mesh, snapshots, or simulation time if OOM occurs.")
+        elif total_mb > 512:
+            st.info(f"ℹ️ Moderate memory usage (~{total_mb:.0f} MB). Should be OK on most deployments.")
+        else:
+            st.success(f"✅ Light memory footprint (~{total_mb:.0f} MB).")
 
     # ---- 3D Domain Sketch ----
     st.subheader("📐 Initial Domain Sketch (3D Interactive)")
@@ -1936,7 +1965,9 @@ if operation_mode == "Run New Simulation":
             'adapt_dt_factor': adapt_dt_factor,
             'ui_throttle': ui_throttle,
             'safe_T_limit': safe_T_limit,
-            'snapshot_interval': snapshot_interval
+            'snapshot_interval': snapshot_interval,
+            'max_snapshots': max_snapshots,
+            'max_history': max_history
         }
         
         status_placeholder = st.empty()
@@ -2108,13 +2139,19 @@ if operation_mode == "Run New Simulation":
                 X = np.linspace(ext['x'][0], ext['x'][1], Nx)
                 Y = np.linspace(ext['y'][0], ext['y'][1], Ny)
                 Z = np.linspace(ext['z'][0], ext['z'][1], Nz)
+                # ───── FIX: flatten coordinates ONCE to avoid repeated allocation ─────
                 Xg, Yg, Zg = np.meshgrid(X, Y, Z, indexing='ij')
+                x_flat = Xg.ravel()
+                y_flat = Yg.ravel()
+                z_flat = Zg.ravel()
+                v_flat = T_final.ravel()
+                del Xg, Yg, Zg  # free meshgrid immediately
                 fig_iso = go.Figure()
                 for lvl in iso_levels:
                     if T_final.max() > lvl:
                         fig_iso.add_trace(go.Isosurface(
-                            x=Xg.flatten(), y=Yg.flatten(), z=Zg.flatten(),
-                            value=T_final.flatten(),
+                            x=x_flat, y=y_flat, z=z_flat,
+                            value=v_flat,
                             isomin=lvl-5, isomax=lvl+5,
                             opacity=0.3, colorscale=plotly_cmap,
                             showscale=False, name=f'T = {lvl:.0f} K'
@@ -2154,8 +2191,14 @@ if operation_mode == "Run New Simulation":
             st.subheader("⏳ 2D Time Evolution Slider")
             # ───── NEW: locked range for the animation ─────
             zmin, zmax = resolve_cbar_range(advanced_styling, sim_data['history'][0]['T_mid'])
+            # ───── NEW: cap frames to prevent JSON serialization OOM ─────
+            MAX_ANIM_FRAMES = 200
+            hist = sim_data['history']
+            if len(hist) > MAX_ANIM_FRAMES:
+                idxs = np.linspace(0, len(hist) - 1, MAX_ANIM_FRAMES, dtype=int)
+                hist = [hist[i] for i in idxs]
             frames = []
-            for entry in sim_data['history']:
+            for entry in hist:
                 T_mid = entry['T_mid']
                 frames.append(go.Frame(
                     data=[go.Heatmap(z=T_mid, colorscale='Viridis',
@@ -2163,7 +2206,7 @@ if operation_mode == "Run New Simulation":
                     name=f"t={entry['time']:.1f}s"
                 ))
             fig_slider = go.Figure(
-                data=[go.Heatmap(z=sim_data['history'][0]['T_mid'],
+                data=[go.Heatmap(z=hist[0]['T_mid'],
                                  colorscale='Viridis',
                                  zmin=zmin, zmax=zmax)],
                 frames=frames
@@ -2180,7 +2223,7 @@ if operation_mode == "Run New Simulation":
                     'currentvalue': {'prefix': 'Time: ', 'suffix': ' s'},
                     'steps': [
                         {'args': [[f.name], {'frame': {'duration': 0, 'redraw': True}, 'mode': 'immediate'}],
-                         'label': f"{sim_data['history'][i]['time']:.1f}", 'method': 'animate'}
+                         'label': f"{hist[i]['time']:.1f}", 'method': 'animate'}
                         for i, f in enumerate(frames)
                     ]
                 }],
