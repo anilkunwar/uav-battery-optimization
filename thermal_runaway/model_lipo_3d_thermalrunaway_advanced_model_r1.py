@@ -1,14 +1,9 @@
 # =============================================================================
 # Streamlit App: FPV LiPo 3D Thermal Runaway Multi‑Simulation Platform
 # =============================================================================
-# UPGRADED VERSION 3.3 – Hotspot‑only High‑Rise Preset & Quick Preset System
+# UPGRADED VERSION 3.4.0 – Localized ISC heater (defect‑power trigger) added
 # =============================================================================
-# Enhancements (v3.3):
-#   - Added "High‑Rise" reaction preset (ΣH ≈ 2.8e9 J/m³ → ΔT_ad ≈ 1100 K)
-#   - Quick Preset dropdown: "Default (Symmetric)" & "Hotspot High‑Rise"
-#   - High‑Rise preset sets: trigger=650 K, radius=6, h=1, eps=0.2,
-#     kx=ky=10, kz=0.6, T_cap=2000 K, safe_T_limit=2500 K
-#   - All previous OOM fixes and custom color‑bar controls retained
+# All features from v3.3.1 retained; new physically honest trigger option.
 # =============================================================================
 
 import streamlit as st
@@ -72,7 +67,7 @@ st.title("🔥 FPV LiPo 3D Thermal Runaway Multi‑Simulation Platform")
 st.markdown("""
 **Run multiple scenarios • Compare thermal responses • Cloud‑style storage**  
 Run → Save → Compare • Publication‑ready figures • Advanced post‑processing  
-*Upgraded v3.3 — Hotspot‑only high‑rise preset + Quick Preset system*
+*Upgraded v3.4.0 — Localized ISC heater (defect‑power trigger) added*
 """)
 
 COLORMAPS = {
@@ -254,7 +249,7 @@ class PublicationEnhancer:
         return legend
 
 # -----------------------------------------------------------------------------
-# 4. Advanced Styling Controls (unchanged, includes fixed colour‑bar range)
+# 4. Advanced Styling Controls (unchanged)
 # -----------------------------------------------------------------------------
 def get_styling_controls():
     style = {}
@@ -454,7 +449,7 @@ class SimulationDB:
         sims = []
         for sim_id, data in SimulationDB.get_all_simulations().items():
             params = data['params']
-            name = f"{params.get('label', 'LiPo')} h={params['h_conv']:.1f} trig={params['trigger_temp']:.0f}K"
+            name = f"{params.get('label', 'LiPo')} h={params['h_conv']:.1f} trig={params.get('trigger_temp', 'ISC')}"
             sims.append({'id': sim_id, 'name': name, 'params': params})
         return sims
 
@@ -587,7 +582,6 @@ DEFAULT_REACTION_PARAMS = np.array([
     [2.0000e5, 5.700e15, 3.50e8],
 ], dtype=np.float64)
 
-# ===== NEW: High‑Rise preset (ΣH ≈ 2.8e9 → ΔT_ad ≈ 1100 K) =====
 HIGH_RISE_REACTION_PARAMS = np.array([
     [1.3508e5, 1.667e15, 5.00e8],      # SEI
     [1.5006e5, 2.500e13, 1.40e9],      # Electrolyte
@@ -637,13 +631,15 @@ def initialize_reaction_degrees(Nx, Ny, Nz, trigger_radius, trigger_center=None)
     return alphas
 
 # -----------------------------------------------------------------------------
-# 8. Numba Kernel – with T_cap, conservative fuel consumption, sustained heater
+# 8. Numba Kernel – with T_cap, conservative fuel consumption, sustained heater,
+#    and NOW with localized ISC heater (q_loc, isc_active, loc_mask)
 # -----------------------------------------------------------------------------
 @njit(parallel=True, fastmath=True, cache=True)
 def step_3d(T, alphas, dt,
             rho, Cp, kx, ky, kz, dx, dy, dz,
             q_normal, reaction_params, T_amb, h_conv, eps, sigma, R,
-            q_heater, heater_active, heater_face, T_cap):
+            q_heater, heater_active, heater_face,
+            q_loc, isc_active, loc_mask, T_cap):
     Nx, Ny, Nz = T.shape
     T_new = T.copy()
     alphas_new = alphas.copy()
@@ -674,6 +670,8 @@ def step_3d(T, alphas, dt,
                     alphas_new[r,i,j,k] = alpha + dalpha
 
                 q_total = q_normal + q_abuse
+                if isc_active and loc_mask[i,j,k]:
+                    q_total += q_loc
                 q_cap = rho * Cp * max(0.0, (T_cap - T_ijk)) / dt
                 if q_total > q_cap:
                     q_total = q_cap
@@ -739,9 +737,8 @@ def step_3d(T, alphas, dt,
     return T_new, alphas_new
 
 # -----------------------------------------------------------------------------
-# 8.5 Domain Sketch Functions (unchanged, omitted for brevity)
+# 8.5 Domain Sketch Functions (unchanged)
 # -----------------------------------------------------------------------------
-# (Keeping the original functions here – they are unchanged)
 def plot_initial_domain_sketch(params):
     fig, ax = plt.subplots(figsize=(10, 6))
     ax.set_aspect('equal')
@@ -755,10 +752,19 @@ def plot_initial_domain_sketch(params):
     ax.add_patch(air_rect)
     cx, cz = Lx/2, Lz/2
     dx = Lx / (Nx - 1)
-    r_phys = params['trigger_radius'] * dx
-    if r_phys > 0:
-        hotspot = plt.Circle((cx, cz), r_phys, color='#e74c3c', alpha=0.8, label=f'Hotspot ({params["trigger_radius"]} cells)')
-        ax.add_patch(hotspot)
+    # Only show hotspot if not using ISC heater (or always show? We'll keep it optional)
+    if not params.get('local_heater_enabled', False):
+        r_phys = params['trigger_radius'] * dx
+        if r_phys > 0:
+            hotspot = plt.Circle((cx, cz), r_phys, color='#e74c3c', alpha=0.8, label=f'Hotspot ({params["trigger_radius"]} cells)')
+            ax.add_patch(hotspot)
+    else:
+        # Show ISC region
+        r_phys = params['loc_radius'] * dx
+        if r_phys > 0:
+            isc_circle = plt.Circle((cx, cz), r_phys, color='#e67e22', alpha=0.5, label=f'ISC region (r={params["loc_radius"]} cells)')
+            ax.add_patch(isc_circle)
+            ax.text(cx, cz, 'ISC\nheater', ha='center', va='center', color='white', fontweight='bold', fontsize=10)
     arrow_style = dict(arrowstyle='->', color='#e67e22', lw=2, mutation_scale=20)
     ax.annotate('', xy=(Lx/2, Lz + margin*0.6), xytext=(Lx/2, Lz), arrowprops=arrow_style)
     ax.text(Lx/2 + 0.002, Lz + margin*0.6, 'Convection ($h$) + Radiation ($\\epsilon$)', fontsize=11, color='#d35400', ha='left', fontweight='bold')
@@ -817,6 +823,10 @@ def plot_3d_domain_sketch(params):
     Lx, Ly, Lz = params['Lx'], params['Ly'], params['Lz']
     Nx = params['Nx']
     r_phys = params['trigger_radius'] * (Lx / (Nx - 1))
+    # If ISC enabled, show ISC region instead
+    local_heater = params.get('local_heater_enabled', False)
+    if local_heater:
+        r_phys = params['loc_radius'] * (Lx / (Nx - 1))
     u = np.linspace(0, 2 * np.pi, 30); v = np.linspace(0, np.pi, 30)
     x_s = Lx/2 + r_phys * np.outer(np.cos(u), np.sin(v))
     y_s = Ly/2 + r_phys * np.outer(np.sin(u), np.sin(v))
@@ -836,10 +846,16 @@ def plot_3d_domain_sketch(params):
         color='#3498db', opacity=0.15,
         name='Cell Core', showscale=False))
     if r_phys > 0:
+        if local_heater:
+            color = '#e67e22'
+            name = 'ISC Heater Region'
+        else:
+            color = '#e74c3c'
+            name = 'Hotspot Trigger'
         fig.add_trace(go.Surface(
             x=x_s, y=y_s, z=z_s,
-            colorscale=[[0, '#e74c3c'], [1, '#e74c3c']],
-            showscale=False, opacity=0.6, name='Hotspot Trigger'))
+            colorscale=[[0, color], [1, color]],
+            showscale=False, opacity=0.6, name=name))
     arrow_len = max(Lx, Ly, Lz) * 0.35
     faces = {
         'Top (+Z)':    ((Lx/2, Ly/2, Lz),   2, +1),
@@ -1282,7 +1298,7 @@ def create_2d_heatmap_with_mesh(T_2d, extents_xy, style_params,
     return fig
 
 # -----------------------------------------------------------------------------
-# 9. Simulation Runner – with OOM fixes and new preset support
+# 9. Simulation Runner (updated with ISC heater)
 # -----------------------------------------------------------------------------
 def run_simulation(params, progress_callback=None):
     tracemalloc.start()
@@ -1315,6 +1331,12 @@ def run_simulation(params, progress_callback=None):
     heater_face = params.get('heater_face', 0)
     use_heater = params.get('use_heater', False)
 
+    # New ISC heater parameters
+    local_heater = params.get('local_heater_enabled', False)
+    q_loc = params.get('q_loc', 0.0)
+    loc_radius = params.get('loc_radius', 3)
+    loc_cutoff = params.get('loc_cutoff_temp', 520.0)
+
     cfl_factor = params.get('cfl_factor', 0.4)
     adapt_dt_thresh = params.get('adapt_dt_thresh', 600.0)
     adapt_dt_factor = params.get('adapt_dt_factor', 0.8)
@@ -1326,16 +1348,30 @@ def run_simulation(params, progress_callback=None):
     dx = Lx / (Nx - 1); dy = Ly / (Ny - 1); dz = Lz / (Nz - 1)
     extents = {'x': (0, Lx), 'y': (0, Ly), 'z': (0, Lz)}
 
-    T = initialize_temperature_field(
-        Nx, Ny, Nz,
-        T_amb=T_amb,
-        trigger_temp=trigger_temp,
-        trigger_radius=trigger_radius
-    )
+    # Initialize T – either uniform (if local heater) or with imposed hotspot
+    if local_heater:
+        T = np.full((Nx, Ny, Nz), T_amb, dtype=np.float64)
+    else:
+        T = initialize_temperature_field(
+            Nx, Ny, Nz,
+            T_amb=T_amb,
+            trigger_temp=trigger_temp,
+            trigger_radius=trigger_radius
+        )
+
     alphas = initialize_reaction_degrees(
         Nx, Ny, Nz,
         trigger_radius=trigger_radius
     )
+
+    # Create mask for localized ISC heater
+    loc_mask = np.zeros((Nx, Ny, Nz), dtype=np.bool_)
+    if local_heater and loc_radius > 0:
+        ii = np.arange(Nx)[:,None,None]
+        jj = np.arange(Ny)[None,:,None]
+        kk = np.arange(Nz)[None,None,:]
+        dist = np.sqrt((ii - Nx//2)**2 + (jj - Ny//2)**2 + (kk - Nz//2)**2)
+        loc_mask = dist <= loc_radius
 
     alpha_x = kx / (rho * Cp)
     alpha_y = ky / (rho * Cp)
@@ -1370,10 +1406,17 @@ def run_simulation(params, progress_callback=None):
 
         heater_active = use_heater and (T_max < heater_cutoff_temp)
 
+        # Determine ISC active state: local T below cutoff
+        if local_heater and np.any(loc_mask):
+            isc_active = np.max(T[loc_mask]) < loc_cutoff
+        else:
+            isc_active = False
+
         T, alphas = step_3d(T, alphas, dt,
                            rho, Cp, kx, ky, kz, dx, dy, dz,
                            q_normal, reaction_params, T_amb, h_conv, eps, sigma, R,
-                           q_heater, heater_active, heater_face, T_cap)
+                           q_heater, heater_active, heater_face,
+                           q_loc, isc_active, loc_mask, T_cap)
         t += dt; step += 1
 
         if t >= sample_next:
@@ -1455,7 +1498,7 @@ def run_simulation(params, progress_callback=None):
     return history, metadata, final_3D, snapshots_3d, snapshot_times
 
 # -----------------------------------------------------------------------------
-# 10. Enhanced Plotting Functions (unchanged – with colorbar support)
+# 10. Enhanced Plotting Functions (unchanged)
 # -----------------------------------------------------------------------------
 def create_publication_heatmaps(simulations, frames, config, style_params):
     n_sims = len(simulations)
@@ -1750,13 +1793,28 @@ def create_time_series_with_marker(sim_data, current_time, style_params):
     return fig
 
 # -----------------------------------------------------------------------------
-# 12. Main UI – with Quick Preset system
+# 12. Main UI – with Quick Preset system (updated to include ISC heater)
 # -----------------------------------------------------------------------------
 advanced_styling = get_styling_controls()
 
-# ─── Quick Preset system ────────────────────────────────────────────────────
+# ---- Preset system: initialise all preset keys with valid defaults ----
+preset_defaults = {
+    'trigger_temp': 450,
+    'trigger_radius': 3,
+    'h_conv': 5.0,
+    'eps': 0.9,
+    'kx': 25.0,
+    'ky': 25.0,
+    'kz': 1.5,
+    'T_cap': 1200,
+    'safe_T_limit': 1500,
+    'reaction_preset': 'Realistic (Recommended)',
+}
+for key, default in preset_defaults.items():
+    if f'preset_{key}' not in st.session_state:
+        st.session_state[f'preset_{key}'] = default
+
 def apply_preset(preset_name):
-    """Update session_state with preset values and rerun."""
     presets = {
         "Default (Symmetric)": {
             'trigger_temp': 450,
@@ -1788,23 +1846,6 @@ def apply_preset(preset_name):
             st.session_state[f'preset_{key}'] = val
         st.rerun()
 
-# Initialize session_state defaults for preset keys if not present
-preset_defaults = {
-    'trigger_temp': 450,
-    'trigger_radius': 3,
-    'h_conv': 5.0,
-    'eps': 0.9,
-    'kx': 25.0,
-    'ky': 25.0,
-    'kz': 1.5,
-    'T_cap': 1200,
-    'safe_T_limit': 1500,
-    'reaction_preset': 'Realistic (Recommended)'
-}
-for key, default_val in preset_defaults.items():
-    if f'preset_{key}' not in st.session_state:
-        st.session_state[f'preset_{key}'] = default_val
-
 operation_mode = st.sidebar.radio(
     "Operation Mode",
     ["Run New Simulation", "Compare Saved Simulations"],
@@ -1814,7 +1855,7 @@ operation_mode = st.sidebar.radio(
 if operation_mode == "Run New Simulation":
     st.sidebar.header("🎛️ New Simulation Setup")
 
-    # ─── Quick Preset selector ──────────────────────────────────────────────
+    # Quick Preset selector
     preset_options = ["Default (Symmetric)", "Hotspot High‑Rise"]
     selected_preset = st.sidebar.selectbox(
         "⚡ Quick Preset",
@@ -1849,32 +1890,36 @@ if operation_mode == "Run New Simulation":
             Lz = st.number_input("Thickness (m)", 0.003, 0.050, 0.010, 0.001)
 
     with st.sidebar.expander("Material & Boundary"):
-        # Use preset values if set, else defaults
         rho = st.number_input("Density (kg/m³)", 1000.0, 3000.0, 2330.0, 10.0)
         Cp = st.number_input("Cp (J/kg·K)", 500.0, 2000.0, 1100.0, 50.0)
-        default_kx = st.session_state.get('preset_kx', 25.0)
-        default_ky = st.session_state.get('preset_ky', 25.0)
-        default_kz = st.session_state.get('preset_kz', 1.5)
-        kx = st.number_input("k_x (W/m·K)", 5.0, 60.0, default_kx, 1.0)
-        ky = st.number_input("k_y (W/m·K)", 5.0, 60.0, default_ky, 1.0)
-        kz = st.number_input("k_z (W/m·K)", 0.5, 5.0, default_kz, 0.1)
+        kx = st.number_input("k_x (W/m·K)", 5.0, 60.0, st.session_state['preset_kx'], 1.0)
+        ky = st.number_input("k_y (W/m·K)", 5.0, 60.0, st.session_state['preset_ky'], 1.0)
+        kz = st.number_input("k_z (W/m·K)", 0.5, 5.0, st.session_state['preset_kz'], 0.1)
         T_amb = st.number_input("Ambient T (K)", 250, 350, 298, 1)
-        default_h = st.session_state.get('preset_h_conv', 5.0)
-        h_conv = st.number_input("h_conv (W/m²·K)", 0.0, 50.0, default_h, 1.0,
+        h_conv = st.number_input("h_conv (W/m²·K)", 0.0, 50.0, st.session_state['preset_h_conv'], 1.0,
                                  help="Use ~5 for near-adiabatic (ARC-style), ~15 for natural convection")
-        default_eps = st.session_state.get('preset_eps', 0.9)
-        eps = st.number_input("Emissivity", 0.05, 0.95, default_eps, 0.05)
+        eps = st.number_input("Emissivity", 0.05, 0.95, st.session_state['preset_eps'], 0.05)
 
     # ===== "Heat & Trigger" =====
-    with st.sidebar.expander("🔥 Central Hotspot (Symmetric Trigger)", expanded=True):
+    with st.sidebar.expander("🔥 Trigger & Heat Sources", expanded=True):
+        st.markdown("**Central Hotspot (imposed T)** – use if you want to start with a heated blob.")
         q_normal = st.number_input("Normal Heat (W/m³)", 0.0, 5e5, 5e4, 1e4, format="%.0f",
                                    help="Background heat generation (usually set to 0)")
-        default_trigger = st.session_state.get('preset_trigger_temp', 450)
-        trigger_temp = st.number_input("Hotspot T (K)", 250, 2000, default_trigger, 5,
+        trigger_temp = st.number_input("Hotspot T (K)", 250, 2000, st.session_state['preset_trigger_temp'], 5,
                                        help="Central hotspot temperature. Set >400 K for immediate runaway.")
-        default_radius = st.session_state.get('preset_trigger_radius', 3)
-        trigger_radius = st.slider("Hotspot radius (cells)", 1, 10, default_radius,
+        trigger_radius = st.slider("Hotspot radius (cells)", 1, 10, st.session_state['preset_trigger_radius'],
                                    help="Radius of the spherical hotspot in grid cells.")
+        st.markdown("---")
+        st.markdown("**Localized ISC Heater (power‑controlled)** – most physically honest trigger.")
+        local_heater = st.checkbox("Enable localized ISC heater at defect", value=False,
+                                   help="Volumetric Joule heating in a small sphere; fuses open at cutoff.")
+        q_loc = st.number_input("ISC power density (W/m³)", 0, int(1e11), 5_000_000_000,
+                                format="%.0e", disabled=not local_heater)
+        loc_radius = st.slider("ISC radius (cells)", 1, 8, 3, disabled=not local_heater)
+        loc_cutoff = st.number_input("ISC cutoff T (K)", 350, 900, 520, 5,
+                                     disabled=not local_heater,
+                                     help="Short fuses open once local T exceeds this; chemistry then self-propagates")
+        st.info("If ISC heater is enabled, the imposed hotspot is ignored and the cell starts uniformly at ambient T.")
 
     # ===== Sustained Heater (optional) =====
     with st.sidebar.expander("🔥 Sustained Heater (Abuse Protocol)", expanded=True):
@@ -1897,28 +1942,25 @@ if operation_mode == "Run New Simulation":
         dt_max = st.number_input("dt_max (s)", 0.001, 0.1, 0.01, 0.005, format="%.3f")
         sample_interval = st.number_input("Sample interval (s)", 0.1, 10.0, 0.5, 0.1)
 
-    # ===== UPDATED: Advanced Numerics with preset support =====
+    # Advanced Numerics
     with st.sidebar.expander("⚙️ Advanced Numerics", expanded=False):
         cfl_factor = st.slider("CFL Safety Factor", 0.1, 0.45, 0.4, 0.05)
         adapt_dt_thresh = st.slider("Adaptive dt Threshold (K)", 400, 1000, 600, 10)
         adapt_dt_factor = st.slider("dt Shrink Factor", 0.5, 0.95, 0.8, 0.05)
-        default_safe = st.session_state.get('preset_safe_T_limit', 1500)
-        safe_T_limit = st.slider("Safety Cutoff Temp (K)", 1000, 3000, default_safe, 50,
+        safe_T_limit = st.slider("Safety Cutoff Temp (K)", 1000, 3000, st.session_state['preset_safe_T_limit'], 50,
                                  help="Raise to 2500 K for high‑rise presets.")
-        default_Tcap = st.session_state.get('preset_T_cap', 1200)
-        T_cap = st.slider("Temperature Cap (K)", 800, 3000, default_Tcap, 50,
+        T_cap = st.slider("Temperature Cap (K)", 800, 3000, st.session_state['preset_T_cap'], 50,
                           help="Prevents numerical overshoot; must be above physical peak.")
         max_steps = st.number_input("Max Steps (break)", 100000, 10000000, 2000000, 500000,
                                     help="Safety break if step count exceeds this.")
         wall_limit_s = st.number_input("Wall‑time Limit (s)", 30, 600, 300, 30,
                                        help="Hard wall‑clock cap to prevent endless loops.")
 
-    # ─── Reaction Kinetics Preset ──────────────────────────────────────────
-    default_reaction_preset = st.session_state.get('preset_reaction_preset', 'Realistic (Recommended)')
+    # Reaction Kinetics Preset
+    default_reaction_preset = st.session_state['preset_reaction_preset']
     with st.sidebar.expander("🔬 Reaction Kinetics Preset", expanded=True):
-        # Map preset names to parameter arrays
-        reaction_preset_options = ['Realistic (Recommended)', 'Aggressive (Faster)', 'Original (Conservative)', 'High‑Rise (Hotspot only)', 'Custom']
-        # Ensure default is in list
+        reaction_preset_options = ['Realistic (Recommended)', 'Aggressive (Faster)', 
+                                   'Original (Conservative)', 'High‑Rise (Hotspot only)', 'Custom']
         if default_reaction_preset not in reaction_preset_options:
             default_reaction_preset = 'Realistic (Recommended)'
         reaction_preset = st.radio(
@@ -1952,19 +1994,27 @@ if operation_mode == "Run New Simulation":
                     with c3:
                         reaction_params[i,2] = st.number_input(f"H{i} (W/m³)", value=float(reaction_params[i,2]), key=f'h_{i}')
 
-    label = st.sidebar.text_input("Run Label (optional)", value=f"h={h_conv or 5.0:.1f} trig={trigger_temp or 450:.0f}K")
+    # Label – now safely uses defined variables
+    label = st.sidebar.text_input("Run Label (optional)", value=f"h={h_conv:.1f} trig={'ISC' if local_heater else f'{trigger_temp:.0f}K'}")
 
-    # ===== Pre‑Simulation Diagnostics =====
+    # Pre‑Simulation Diagnostics
     with st.sidebar.expander("🔍 Pre‑Simulation Diagnostics", expanded=False):
-        st.write(f"**Trigger Temperature:** {trigger_temp} K = {trigger_temp-273.15:.0f} °C")
-        st.write(f"**Ambient:** {T_amb} K = {T_amb-273.15:.0f} °C")
-        st.write(f"**ΔT:** {trigger_temp - T_amb:.1f} K")
-        if trigger_temp < 420 and trigger_radius > 0:
-            st.error("⚠️ Trigger too low! Use ≥ 420 K for immediate runaway.")
-        elif trigger_temp < 450 and trigger_radius > 0:
-            st.warning("⚠️ Lower end – consider 450+ K for robust runaway.")
+        if local_heater:
+            st.write("**Trigger:** Localized ISC heater (power‑controlled)")
+            st.write(f"**Power density:** {q_loc:.1e} W/m³")
+            st.write(f"**ISC radius:** {loc_radius} cells")
+            st.write(f"**Cutoff T:** {loc_cutoff} K")
+            if q_loc < 3e9:
+                st.warning("⚠️ Power may be too low for ignition; consider increasing.")
         else:
-            st.success("✅ Realistic central hotspot trigger.")
+            st.write(f"**Trigger Temperature:** {trigger_temp} K = {trigger_temp-273.15:.0f} °C")
+            if trigger_temp < 420 and trigger_radius > 0:
+                st.error("⚠️ Trigger too low! Use ≥ 420 K for immediate runaway.")
+            elif trigger_temp < 450 and trigger_radius > 0:
+                st.warning("⚠️ Lower end – consider 450+ K for robust runaway.")
+            else:
+                st.success("✅ Realistic central hotspot trigger.")
+        st.write(f"**Ambient:** {T_amb} K = {T_amb-273.15:.0f} °C")
         st.write(f"**Mesh cells:** {Nx*Ny*Nz:,}")
         st.write(f"**Snapshots (approx):** {int(sim_time / snapshot_interval)}")
         if use_heater:
@@ -1973,17 +2023,20 @@ if operation_mode == "Run New Simulation":
         else:
             st.info("ℹ️ Symmetric central runaway mode (Heater OFF).")
 
-    # ---- Domain Sketch ----
+    # Domain Sketch
     st.subheader("📐 Initial Domain Sketch (3D Interactive)")
     sketch_params = {
         'Lx': Lx, 'Ly': Ly, 'Lz': Lz,
         'Nx': Nx, 'Ny': Ny, 'Nz': Nz,
-        'T_amb': T_amb, 'trigger_radius': trigger_radius
+        'T_amb': T_amb,
+        'trigger_radius': trigger_radius,
+        'local_heater_enabled': local_heater,
+        'loc_radius': loc_radius if local_heater else 0,
     }
     fig_3d = plot_3d_domain_sketch(sketch_params)
     st.plotly_chart(fig_3d, width='stretch')
 
-    # ---- Efficiency Monitor ----
+    # Efficiency Monitor
     if 'last_efficiency' in st.session_state:
         st.subheader("⚡ Compute Efficiency Monitor (Last Run)")
         eff = st.session_state['last_efficiency']
@@ -2000,7 +2053,7 @@ if operation_mode == "Run New Simulation":
         with st.expander("📊 Detailed Efficiency Metrics & JSON"):
             st.json(eff)
 
-    # ---- Run Button ----
+    # Run Button
     if st.sidebar.button("🚀 Run & Save", type="primary"):
         params = {
             'Lx': Lx, 'Ly': Ly, 'Lz': Lz,
@@ -2033,6 +2086,11 @@ if operation_mode == "Run New Simulation":
             'q_heater': q_heater if use_heater else 0.0,
             'heater_cutoff_temp': heater_cutoff_temp if use_heater else 0.0,
             'heater_face': heater_face_val if use_heater else 0,
+            # ISC heater params
+            'local_heater_enabled': local_heater,
+            'q_loc': q_loc if local_heater else 0.0,
+            'loc_radius': loc_radius if local_heater else 0,
+            'loc_cutoff_temp': loc_cutoff if local_heater else 0.0,
         }
 
         progress_bar = st.progress(0.0)
@@ -2060,7 +2118,7 @@ if operation_mode == "Run New Simulation":
         time.sleep(0.5)
         st.rerun()
 
-    # ---- Saved Simulations and Visualizations (same as before) ----
+    # Saved Simulations and visualisation (same as before)
     st.header("📋 Saved Simulations")
     sims = SimulationDB.get_simulation_list()
     if sims:
@@ -2077,7 +2135,7 @@ if operation_mode == "Run New Simulation":
     else:
         st.info("No simulations saved yet.")
 
-    # ───── “Use Global Min/Max” button logic ──────────────────────────
+    # “Use Global Min/Max” button logic
     if advanced_styling.get('cbar_auto_from_global', False) and sims:
         latest_id = sims[-1]['id']
         sim_data = SimulationDB.get_all_simulations()[latest_id]
@@ -2522,7 +2580,7 @@ if st.sidebar.button("📦 Generate Export", type="primary"):
 # -----------------------------------------------------------------------------
 # 14. Theoretical Documentation (updated)
 # -----------------------------------------------------------------------------
-with st.expander("🔬 Theoretical Soundness & Advanced Analysis (v3.3)", expanded=False):
+with st.expander("🔬 Theoretical Soundness & Advanced Analysis (v3.4.0)", expanded=False):
     st.markdown("""
     **Multi‑Stage Arrhenius Kinetics**
     - **α‑lock fix:** Reaction degrees initialise at 0.0 (unreacted) with small global seeds.
@@ -2531,12 +2589,11 @@ with st.expander("🔬 Theoretical Soundness & Advanced Analysis (v3.3)", expand
     - **Enthalpy scaling:** H scaled to match commercial cell energy density.
     - **High‑Rise preset:** ΣH ≈ 2.8e9 J/m³ → adiabatic ΔT ≈ 1100 K (peak ~1400 K with low losses).
 
-    **Hotspot‑only High‑Rise Configuration**
-    - Trigger: 650 K, radius 6 (super‑critical ignition)
-    - Low losses: h=1, ε=0.2
-    - Reduced conductivity: kx=ky=10, kz=0.6 (sharper front)
-    - Numerical ceilings: T_cap=2000 K, safe_T=2500 K
-    - Reaction preset: High‑Rise (included)
+    **Localized ISC Heater (new in v3.4.0)**
+    - Simulates a real internal short circuit by applying volumetric Joule heating in a small sphere.
+    - The heater turns off (fuses open) when local temperature exceeds `loc_cutoff`, allowing chemistry to take over.
+    - Critical power threshold: \(q_{\text{loc}} \gtrsim 6k\Delta T / r^2\). With typical values, \(q_{\text{loc}} \approx 3\times10^9\) W/m³.
+    - Sweeping `q_loc` maps the sub‑/super‑critical ignition boundary.
 
     **OOM‑Safe Simulation Loop**
     - Exits early when fuel < 2%
@@ -2549,4 +2606,4 @@ with st.expander("🔬 Theoretical Soundness & Advanced Analysis (v3.3)", expand
     - Auto‑detect or lock global scale.
     """)
 
-st.caption("🔥 Multi‑Simulation Thermal Runaway Platform • v3.3 • Quick Presets for Hotspot‑only High‑Rise • OOM‑safe • Custom color‑bar")
+st.caption("🔥 Multi‑Simulation Thermal Runaway Platform • v3.4.0 • Localized ISC heater added • OOM‑safe • Custom color‑bar")
