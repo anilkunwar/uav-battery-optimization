@@ -2,12 +2,10 @@
 # Streamlit App: FPV and other types of UAV Drones LiPo 3D Thermal Runaway
 # Multi‑Simulation Platform
 # =============================================================================
-# UPGRADED VERSION 3.6.0 – Definitive 3D Camera Persistence
+# UPGRADED VERSION 3.6.1 – Fixed widget state conflict and deprecation warnings
 # =============================================================================
-# - st.form for structural controls (n_slices, show_cross, slice_axis, etc.)
-# - Native Plotly Frames for time slider (no Python rerun on time change)
-# - Pre‑allocated constant traces (trace count never changes)
-# - use_container_width=True for all plotly charts
+# - Replaced use_container_width with width='stretch'
+# - Fixed session_state assignment in multi-slice form
 # =============================================================================
 
 import streamlit as st
@@ -71,7 +69,7 @@ st.title("🔥 FPV LiPo 3D Thermal Runaway Multi‑Simulation Platform")
 st.markdown("""
 **Run multiple scenarios • Compare thermal responses • Cloud‑style storage**  
 Run → Save → Compare • Publication‑ready figures • Advanced post‑processing  
-*Upgraded v3.6.0 — Definitive 3D camera persistence*
+*Upgraded v3.6.1 — Fixed stability and deprecation warnings*
 """)
 
 COLORMAPS = {
@@ -2169,7 +2167,7 @@ if operation_mode == "Run New Simulation":
         'loc_radius': loc_radius if local_heater else 0,
     }
     fig_3d = plot_3d_domain_sketch(sketch_params)
-    st.plotly_chart(fig_3d, use_container_width=True, key='domain_sketch_chart')
+    st.plotly_chart(fig_3d, width='stretch', key='domain_sketch_chart')
 
     # Efficiency Monitor
     if 'last_efficiency' in st.session_state:
@@ -2316,34 +2314,34 @@ if operation_mode == "Run New Simulation":
                             show_cross = st.checkbox("Show X/Y cross‑slices", value=False, key='show_cross_ms')
                         apply_changes = st.form_submit_button("Apply Structural Changes")
                     
-                    # Use the latest values from the form
-                    if apply_changes or 'multi_slice_applied' not in st.session_state:
-                        st.session_state['multi_slice_applied'] = True
-                        st.session_state['n_slices_ms'] = n_slices
-                        st.session_state['show_cross_ms'] = show_cross
-                    else:
-                        n_slices = st.session_state.get('n_slices_ms', 5)
-                        show_cross = st.session_state.get('show_cross_ms', False)
+                    # Store applied values in separate session state keys (do NOT modify widget keys)
+                    if apply_changes:
+                        st.session_state['applied_n_slices'] = n_slices
+                        st.session_state['applied_show_cross'] = show_cross
+                    
+                    # Use applied values if they exist, else defaults
+                    n_slices = st.session_state.get('applied_n_slices', 5)
+                    show_cross = st.session_state.get('applied_show_cross', False)
                     
                     fig_ms = create_multi_slice_3d_visualization_frames(
                         snapshots, times, ext, advanced_styling,
                         n_slices=n_slices,
                         show_cross_slices=show_cross
                     )
-                    st.plotly_chart(fig_ms, use_container_width=True, key='multi_slice_chart')
+                    st.plotly_chart(fig_ms, width='stretch', key='multi_slice_chart')
                     
                     # Also show the time-series with marker (optional)
                     current_time = times[-1]  # latest snapshot
                     ts_fig = create_time_series_with_marker(sim_data, current_time, advanced_styling)
                     if ts_fig:
-                        st.plotly_chart(ts_fig, use_container_width=True, key='time_series_chart')
+                        st.plotly_chart(ts_fig, width='stretch', key='time_series_chart')
                 else:
                     st.warning("This simulation has no 3D snapshots. Re‑run with snapshot storage enabled.")
                     fig_ms = create_multi_slice_3d_visualization_frames(
                         [T_final], [sim_data['metadata']['final_time']], ext, advanced_styling,
                         n_slices=5, show_cross_slices=False
                     )
-                    st.plotly_chart(fig_ms, use_container_width=True, key='multi_slice_chart')
+                    st.plotly_chart(fig_ms, width='stretch', key='multi_slice_chart')
 
             with tabs[1]:
                 # Structural controls in a form
@@ -2364,7 +2362,7 @@ if operation_mode == "Run New Simulation":
                     slice_axis=slice_axis,
                     slice_position=slice_pos
                 )
-                st.plotly_chart(fig_sw, use_container_width=True, key='single_slice_chart')
+                st.plotly_chart(fig_sw, width='stretch', key='single_slice_chart')
 
             with tabs[2]:
                 # Structural controls in a form
@@ -2408,7 +2406,7 @@ if operation_mode == "Run New Simulation":
                     title=dict(text=f'🔥 Isosurfaces (Smooth) | Range: {lo:.0f}–{hi:.0f} K', x=0.5),
                     height=700
                 )
-                st.plotly_chart(fig_iso, use_container_width=True, key='isosurface_chart')
+                st.plotly_chart(fig_iso, width='stretch', key='isosurface_chart')
 
             with tabs[3]:
                 # 2D heatmap controls in a form
@@ -2468,7 +2466,7 @@ if operation_mode == "Run New Simulation":
                 }],
                 width=800, height=600
             )
-            st.plotly_chart(fig_slider, use_container_width=True, key='2d_heatmap_slider')
+            st.plotly_chart(fig_slider, width='stretch', key='2d_heatmap_slider')
 
 else:
     st.header("🔬 Multi‑Simulation Comparison")
@@ -2719,7 +2717,7 @@ if st.sidebar.button("📦 Generate Export", type="primary"):
 # -----------------------------------------------------------------------------
 # 14. Theoretical Documentation (updated)
 # -----------------------------------------------------------------------------
-with st.expander("🔬 Theoretical Soundness & Advanced Analysis (v3.6.0)", expanded=False):
+with st.expander("🔬 Theoretical Soundness & Advanced Analysis (v3.6.1)", expanded=False):
     st.markdown("""
     **Multi‑Stage Arrhenius Kinetics**
     - **α‑lock fix:** Reaction degrees initialise at 0.0 (unreacted) with small global seeds.
@@ -2752,6 +2750,10 @@ with st.expander("🔬 Theoretical Soundness & Advanced Analysis (v3.6.0)", expa
     **3D Camera Persistence**
     - `uirevision` tags + `st.form` + Plotly Frames + pre‑allocated traces.
     - Rotating, zooming, or panning any 3D chart is preserved across all interactions.
+
+    **Latest Fixes (v3.6.1)**
+    - Replaced deprecated `use_container_width` with `width='stretch'`.
+    - Fixed `st.session_state` conflict in multi‑slice form – applied values now stored in separate keys.
     """)
 
-st.caption("🔥 Multi‑Simulation Thermal Runaway Platform • v3.6.0 • Definitive Camera Persistence • Drone Battery Models • Auto‑scaled physics • Custom color‑bar")
+st.caption("🔥 Multi‑Simulation Thermal Runaway Platform • v3.6.1 • Fixed session state conflict • Deprecation warnings resolved")
