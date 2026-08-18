@@ -8,9 +8,9 @@ Concept GraphFormer (Four Categories of Battery Modeling in Drones: I HARDWARE A
 CHARGING AND MAINTENANCE PROTOCOL )
 
 
-[![meaningtowords](https://img.shields.io/badge/batteryindronesgraphformer-v1.0-yellow)](https://battery-optmization-in-drone1.streamlit.app/) ( generic 2 with no categorical priorities, sankey and other diagrams)
+[![meaningtowords](https://img.shields.io/badge/batteryindronesgraphformer-v1.0-yellow)](https://battery-optimization-in-drone1.streamlit.app/) ( generic 2 with no categorical priorities, sankey and other diagrams)
 
-[![meaningtowords](https://img.shields.io/badge/batteryindronesgraphformer-v2.0-yellow)](https://battery-optmization-in-drone2.streamlit.app/) ( categorical priorities based upon queries, sankey and other diagrams)
+[![meaningtowords](https://img.shields.io/badge/batteryindronesgraphformer-v2.0-yellow)](https://battery-optimization-in-drone2.streamlit.app/) ( categorical priorities based upon queries, sankey and other diagrams)
 
 Contains Module for QDWA results Display:
 
