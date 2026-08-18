@@ -14,4 +14,4 @@ CHARGING AND MAINTENANCE PROTOCOL )
 
 Contains Module for QDWA results Display:
 
-[![meaningtowords](https://img.shields.io/badge/batteryindronesgraphformer-v100.0-yellow)](https://batteryoptmization-in-drone.streamlit.app/) ( categorical priorities based upon queries, sankey and other diagrams)
+[![meaningtowords](https://img.shields.io/badge/batteryindronesgraphformer-v100.0-yellow)](https://battery-optimization-in-drone.streamlit.app/) ( categorical priorities based upon queries, sankey and other diagrams)
