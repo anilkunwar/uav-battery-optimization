@@ -1,3 +1,4 @@
+#!usrbinenv python
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
 """
@@ -7330,153 +7331,7 @@ CATEGORY_COLORS = {
     "Charging & Maintenance Protocols":         "#10B981",  # emerald
 }
 
-# -----------------------------------------------------------------------------
-#  SANITIZATION HELPERS FOR PLOTLY SANKEY (FIX)
-# -----------------------------------------------------------------------------
-def sanitize_sankey_color(color: Any) -> str:
-    """
-    Ensure a color value is a valid Plotly Sankey link color.
-    Returns a safe fallback if the input is invalid.
-    Valid formats: '#RRGGBB', 'rgba(r,g,b,a)', or named CSS colors.
-    """
-    FALLBACK = "rgba(150,150,150,0.4)"
 
-    if color is None:
-        return FALLBACK
-
-    # Handle pandas NA types
-    try:
-        if pd.isna(color):
-            return FALLBACK
-    except (TypeError, ValueError):
-        pass
-
-    # Handle numpy types
-    if isinstance(color, (np.integer, np.floating)):
-        return FALLBACK
-
-    # Convert to string
-    color_str = str(color).strip()
-
-    # Reject empty strings
-    if not color_str:
-        return FALLBACK
-
-    # Validate hex format: #RRGGBB or #RGB
-    if color_str.startswith('#'):
-        hex_part = color_str[1:]
-        # Remove alpha if present (#RRGGBBAA)
-        if len(hex_part) == 8:
-            hex_part = hex_part[:6]
-        if len(hex_part) == 3:
-            # Expand #RGB to #RRGGBB
-            hex_part = ''.join(c * 2 for c in hex_part)
-        if len(hex_part) == 6:
-            try:
-                int(hex_part, 16)
-                return f"#{hex_part}"
-            except ValueError:
-                return FALLBACK
-        else:
-            return FALLBACK
-
-    # Validate rgba() format
-    rgba_match = re.match(
-        r'^rgba\(\s*(\d{1,3})\s*,\s*(\d{1,3})\s*,\s*(\d{1,3})\s*,\s*([01]?\.?\d*)\s*\)$',
-        color_str
-    )
-    if rgba_match:
-        r, g, b, a = rgba_match.groups()
-        r = min(max(int(r), 0), 255)
-        g = min(max(int(g), 0), 255)
-        b = min(max(int(b), 0), 255)
-        a = min(max(float(a), 0.0), 1.0)
-        return f"rgba({r},{g},{b},{a})"
-
-    # Validate rgb() format
-    rgb_match = re.match(
-        r'^rgb\(\s*(\d{1,3})\s*,\s*(\d{1,3})\s*,\s*(\d{1,3})\s*\)$',
-        color_str
-    )
-    if rgb_match:
-        r, g, b = rgb_match.groups()
-        r = min(max(int(r), 0), 255)
-        g = min(max(int(g), 0), 255)
-        b = min(max(int(b), 0), 255)
-        return f"rgba({r},{g},{b},0.4)"
-
-    # List of valid named CSS colors (subset most commonly used)
-    NAMED_COLORS = {
-        "red", "green", "blue", "white", "black", "gray", "grey",
-        "yellow", "orange", "purple", "pink", "brown", "cyan",
-        "magenta", "lime", "teal", "navy", "maroon", "olive",
-        "aqua", "fuchsia", "silver", "transparent",
-    }
-    if color_str.lower() in NAMED_COLORS:
-        return color_str.lower()
-
-    # If nothing matched, use fallback
-    return FALLBACK
-
-
-def sanitize_sankey_links(links: List[Dict]) -> List[Dict]:
-    """
-    Sanitize all color fields in a list of Sankey link dictionaries.
-    Also validates source/target/value are valid types.
-    """
-    sanitized = []
-    for link in links:
-        if not isinstance(link, dict):
-            continue
-
-        # Skip links without required fields
-        if "source" not in link or "target" not in link:
-            continue
-
-        clean_link = {
-            "source": int(link["source"]) if not isinstance(link["source"], int) else link["source"],
-            "target": int(link["target"]) if not isinstance(link["target"], int) else link["target"],
-            "value": float(link["value"]) if not isinstance(link["value"], (int, float)) else link["value"],
-        }
-
-        # Handle value being NaN or negative
-        try:
-            if pd.isna(clean_link["value"]) or clean_link["value"] <= 0:
-                clean_link["value"] = 1.0
-        except Exception:
-            clean_link["value"] = 1.0
-
-        # Sanitize color if present
-        if "color" in link and link["color"] is not None:
-            clean_link["color"] = sanitize_sankey_color(link["color"])
-
-        sanitized.append(clean_link)
-
-    return sanitized
-
-
-def sanitize_sankey_nodes(nodes: List[Dict]) -> List[Dict]:
-    """Sanitize node color fields for Sankey diagrams."""
-    sanitized = []
-    for node in nodes:
-        if not isinstance(node, dict):
-            continue
-        if "label" not in node:
-            continue
-
-        clean_node = {"label": str(node["label"])}
-
-        if "color" in node and node["color"] is not None:
-            clean_node["color"] = sanitize_sankey_color(node["color"])
-
-        sanitized.append(clean_node)
-
-    return sanitized
-
-
-# ============================================================================
-# QDWA RENDERING FUNCTIONS
-# ============================================================================
 class QDWAWeightAllocator:
     """
     Query Distillation & Weighted Allocation engine.
@@ -7707,42 +7562,17 @@ def render_qdwa_sankey(df: pd.DataFrame, query: str):
     node_colors = ["#6366F1"] + colors
     link_colors = [f"{c}88" for c in colors]  # 50% alpha
 
-    # --- Build node and link dicts with sanitization ---
-    node_dict = {
-        "pad": 20,
-        "thickness": 30,
-        "label": labels,
-        "color": node_colors,
-    }
-    link_dict = {
-        "source": sources,
-        "target": targets,
-        "value": values,
-        "color": link_colors,
-    }
-
-    # Sanitize nodes and links
-    safe_nodes = sanitize_sankey_nodes([node_dict])
-    safe_links = sanitize_sankey_links([link_dict])
-
-    # Extract sanitized values
-    safe_node = safe_nodes[0] if safe_nodes else {"label": labels, "color": node_colors}
-    safe_link = safe_links[0] if safe_links else {"source": sources, "target": targets, "value": values}
-
     fig = go.Figure(
         data=[go.Sankey(
             arrangement="snap",
             node=dict(
-                pad=safe_node.get("pad", 20),
-                thickness=safe_node.get("thickness", 30),
-                label=safe_node.get("label", labels),
-                color=safe_node.get("color", node_colors),
+                pad=20, thickness=30,
+                label=labels,
+                color=node_colors,
             ),
             link=dict(
-                source=safe_link.get("source", sources),
-                target=safe_link.get("target", targets),
-                value=safe_link.get("value", values),
-                color=safe_link.get("color", link_colors),
+                source=sources, target=targets,
+                value=values, color=link_colors,
             ),
         )]
     )
