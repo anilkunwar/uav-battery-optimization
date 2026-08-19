@@ -7548,7 +7548,7 @@ def run_qdwa_and_show_weights(qdwa: QDWAWeightAllocator, query: str):
 
     return df, major_cat, major_w
 
-
+#
 def render_qdwa_sankey(df: pd.DataFrame, query: str):
     """Sankey: Query → 4 Categories → Individual Concepts."""
     # Node labels
@@ -7560,7 +7560,17 @@ def render_qdwa_sankey(df: pd.DataFrame, query: str):
     colors  = list(df["Color"])
 
     node_colors = ["#6366F1"] + colors
-    link_colors = [f"{c}88" for c in colors]  # 50% alpha
+
+    # ✅ Convert hex to rgba strings (Plotly-safe)
+    link_colors = []
+    for c in colors:
+        if isinstance(c, str) and c.startswith('#') and len(c) == 7:
+            r = int(c[1:3], 16)
+            g = int(c[3:5], 16)
+            b = int(c[5:7], 16)
+            link_colors.append(f"rgba({r},{g},{b},0.5)")   # 50% alpha
+        else:
+            link_colors.append(c)   # fallback for unexpected formats
 
     fig = go.Figure(
         data=[go.Sankey(
@@ -7582,6 +7592,7 @@ def render_qdwa_sankey(df: pd.DataFrame, query: str):
         font=dict(size=13),
     )
     st.plotly_chart(fig, use_container_width=True)
+
 
 
 def render_qdwa_chord(df: pd.DataFrame):
