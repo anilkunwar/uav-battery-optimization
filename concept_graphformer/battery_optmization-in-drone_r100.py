@@ -6597,6 +6597,318 @@ def render_category_weight_gauge(
     )
 
 # ============================================================================
+# QDWA CHART CUSTOMIZATION HELPERS (Publication-Quality)
+# ============================================================================
+
+def render_qdwa_customization_panel():
+    """Publication-quality customization panel for QDWA charts."""
+    with st.expander("🎨 Publication-Quality Customization (50+ Colormaps, Fonts, Layout)", expanded=False):
+        c1, c2, c3 = st.columns(3)
+        with c1:
+            st.selectbox("Colormap (50+ Options)", options=list(SUPPORTED_COLORMAPS.keys()), 
+                         index=list(SUPPORTED_COLORMAPS.keys()).index(st.session_state.get("qdwa_cmap", "viridis")), 
+                         key="qdwa_cmap", help="Sequential colormaps like viridis/inferno are best for heatmaps.")
+            st.selectbox("Font Family", 
+                         ["Inter, Segoe UI, Roboto, sans-serif", "Arial, Helvetica, sans-serif", "Georgia, serif", "Times New Roman, serif", "Courier New, monospace"], 
+                         index=0, key="qdwa_font")
+            st.slider("Title Font Size", 12, 32, 18, key="qdwa_title_size")
+        with c2:
+            st.slider("Tick/Label Font Size", 8, 24, 12, key="qdwa_tick_size")
+            st.slider("Line/Border Thickness", 0.5, 5.0, 1.5, step=0.5, key="qdwa_line_width")
+            st.slider("Tick Length", 0, 15, 5, key="qdwa_tick_len")
+        with c3:
+            st.slider("Top Margin (px)", 20, 100, 50, key="qdwa_margin_t")
+            st.slider("Bottom Margin (px)", 20, 100, 40, key="qdwa_margin_b")
+            st.slider("Left Margin (px)", 20, 150, 60, key="qdwa_margin_l")
+            st.slider("Right Margin (px)", 20, 150, 40, key="qdwa_margin_r")
+
+def apply_qdwa_pub_style(fig, is_axial=True):
+    """Applies session-state styling to Plotly figures for publication quality."""
+    font = st.session_state.get("qdwa_font", "Inter, sans-serif")
+    title_size = st.session_state.get("qdwa_title_size", 18)
+    tick_size = st.session_state.get("qdwa_tick_size", 12)
+    mt = st.session_state.get("qdwa_margin_t", 50)
+    mb = st.session_state.get("qdwa_margin_b", 40)
+    ml = st.session_state.get("qdwa_margin_l", 60)
+    mr = st.session_state.get("qdwa_margin_r", 40)
+    tl = st.session_state.get("qdwa_tick_len", 5)
+    
+    fig.update_layout(
+        font=dict(family=font, size=tick_size, color="#1e293b"),
+        title_font=dict(family=font, size=title_size, color="#0f172a"),
+        margin=dict(l=ml, r=mr, t=mt, b=mb),
+        plot_bgcolor="rgba(0,0,0,0)",
+        paper_bgcolor="rgba(0,0,0,0)",
+    )
+    if is_axial:
+        fig.update_xaxes(tickfont=dict(size=tick_size, family=font, color="#475569"), ticklen=tl, showgrid=True, gridcolor="rgba(128,128,128,0.15)", zeroline=False)
+        fig.update_yaxes(tickfont=dict(size=tick_size, family=font, color="#475569"), ticklen=tl, showgrid=True, gridcolor="rgba(128,128,128,0.15)", zeroline=False)
+    return fig
+
+# ============================================================================
+# QDWA CHART RENDERING FUNCTIONS (Updated with scale and styling)
+# ============================================================================
+
+def render_qdwa_bar(df: pd.DataFrame, scale: List[str]):
+    """Horizontal bar chart; major category gets a glow border."""
+    sorted_df = df.sort_values("Weight", ascending=True)
+    colors = []
+    border_colors = []
+    border_widths = []
+    lw = st.session_state.get("qdwa_line_width", 1.5)
+    
+    for _, row in sorted_df.iterrows():
+        colors.append(row["Color"])
+        if row["Is Major"]:
+            border_colors.append("#FFD700")
+            border_widths.append(lw * 2)
+        else:
+            border_colors.append(row["Color"])
+            border_widths.append(lw)
+            
+    fig = go.Figure(go.Bar(
+        x=sorted_df["Weight"], y=sorted_df["Short Name"], orientation="h",
+        marker_color=colors, marker_line_color=border_colors, marker_line_width=border_widths,
+        text=sorted_df["Weight"].map("{:.1%}".format), textposition="outside",
+        hovertemplate="<b>%{y}</b><br>Weight: %{x:.4f}<extra></extra>",
+    ))
+    
+    major_row = sorted_df[sorted_df["Is Major"]].iloc[0]
+    fig.add_annotation(x=major_row["Weight"], y=major_row["Short Name"], text="⭐ MAJOR",
+                       showarrow=True, arrowhead=2, ax=40, ay=0,
+                       font=dict(size=13, color="#FFD700", family="sans-serif"))
+    
+    fig.update_layout(title="QDWA Category Weights (Major Highlighted ⭐)",
+                      xaxis_title="Weight", xaxis_range=[0, max(sorted_df["Weight"]) * 1.35],
+                      height=300, showlegend=False)
+    
+    st.plotly_chart(apply_qdwa_pub_style(fig), use_container_width=True)
+
+def render_qdwa_donut(df: pd.DataFrame, scale: List[str]):
+    """Donut chart; major slice is 'exploded' outward."""
+    cats = list(df["Short Name"])
+    weights = list(df["Weight"])
+    colors = list(df["Color"])
+    major_cat = df.loc[df["Is Major"], "Short Name"].iloc[0]
+    
+    # Explode the major slice
+    pull = [0.12 if c == major_cat else 0 for c in cats]
+    
+    fig = go.Figure(go.Pie(
+        labels=[f"{c}\n({w:.1%})" for c, w in zip(cats, weights)],
+        values=weights,
+        marker_colors=colors,
+        hole=0.50,
+        pull=pull,
+        textfont=dict(size=13),
+        hovertemplate="<b>%{label}</b><br>Weight: %{value:.4f}<extra></extra>",
+    ))
+    
+    fig.add_annotation(
+        text=f"⭐ {major_cat}",
+        x=0.5, y=0.5,
+        font=dict(size=16, color="#FFD700", family="sans-serif"),
+        showarrow=False,
+    )
+    
+    fig.update_layout(
+        title="QDWA Weight Distribution (Donut)",
+        height=400,
+        margin=dict(l=20, r=20, t=50, b=20),
+        showlegend=True,
+        legend=dict(font=dict(size=12)),
+    )
+    
+    st.plotly_chart(apply_qdwa_pub_style(fig, is_axial=False), use_container_width=True)
+
+def render_qdwa_radar(df: pd.DataFrame, scale: List[str]):
+    """Spider chart — excellent for showing which category dominates."""
+    cats = list(df["Short Name"])
+    weights = list(df["Weight"])
+    colors = list(df["Color"])
+    n = len(cats)
+    
+    # Close the polygon
+    theta = np.linspace(0, 2 * np.pi, n, endpoint=False).tolist()
+    weights_closed = weights + [weights[0]]
+    theta_closed = theta + [theta[0]]
+    
+    fig = go.Figure()
+    
+    # Filled area
+    fig.add_trace(go.Scatterpolar(
+        r=weights_closed,
+        theta=theta_closed,
+        fill="toself",
+        fillcolor="rgba(99,102,241,0.25)",
+        line=dict(color="#6366F1", width=2),
+        name="Weight profile",
+        hovertemplate="<b>%{theta}</b><br>Weight: %{r:.4f}<extra></extra>",
+    ))
+    
+    # Individual markers with category colors
+    for i in range(n):
+        fig.add_trace(go.Scatterpolar(
+            r=[weights[i]],
+            theta=[np.degrees(theta[i])],
+            mode="markers+text",
+            marker=dict(size=14, color=colors[i], line=dict(width=2, color="white")),
+            text=[f"{weights[i]:.1%}"],
+            textposition="top center",
+            textfont=dict(size=12, color=colors[i]),
+            name=cats[i],
+            showlegend=False,
+            hoverinfo="skip",
+        ))
+    
+    fig.update_layout(
+        polar=dict(
+            radialaxis=dict(visible=True, range=[0, max(weights) * 1.4]),
+            angularaxis=dict(tickfont=dict(size=12)),
+        ),
+        showlegend=False,
+        title="QDWA Weight Radar",
+        height=420,
+        margin=dict(l=60, r=60, t=50, b=40),
+    )
+    
+    st.plotly_chart(apply_qdwa_pub_style(fig, is_axial=False), use_container_width=True)
+
+def render_qdwa_sankey(df: pd.DataFrame, query: str, scale: List[str]):
+    """Sankey diagram: Query → 4 Categories."""
+    # Node labels
+    labels = [f"Query:\n{query[:40]}…"] + list(df["Short Name"])
+    # Source / target / value indices
+    sources = [0, 0, 0, 0]
+    targets = [1, 2, 3, 4]
+    values = list(df["Weight"])
+    colors = list(df["Color"])
+    
+    node_colors = ["#6366F1"] + colors
+    
+    # Convert hex to rgba strings with alpha
+    link_colors = []
+    for c in colors:
+        if isinstance(c, str) and c.startswith('#') and len(c) == 7:
+            r = int(c[1:3], 16)
+            g = int(c[3:5], 16)
+            b = int(c[5:7], 16)
+            link_colors.append(f"rgba({r},{g},{b},0.5)")
+        else:
+            link_colors.append(c)
+    
+    fig = go.Figure(data=[go.Sankey(
+        arrangement="snap",
+        node=dict(
+            pad=20, thickness=30,
+            label=labels,
+            color=node_colors,
+        ),
+        link=dict(
+            source=sources, target=targets,
+            value=values, color=link_colors,
+        ),
+    )])
+    
+    fig.update_layout(
+        title="QDWA Weight Flow (Query → Categories)",
+        height=350,
+        margin=dict(l=10, r=10, t=40, b=10),
+        font=dict(size=13),
+    )
+    
+    st.plotly_chart(apply_qdwa_pub_style(fig, is_axial=False), use_container_width=True)
+
+def render_qdwa_chord(df: pd.DataFrame, scale: List[str]):
+    """
+    Chord-style diagram: radial bar (chord approximation) plus an interaction heatmap.
+    """
+    cats = list(df["Short Name"])
+    weights = list(df["Weight"])
+    colors = list(df["Color"])
+    n = len(cats)
+    
+    # --- Radial bar (chord approximation) ---
+    theta = np.linspace(0, 2 * np.pi, n, endpoint=False)
+    width = 2 * np.pi / n * 0.75
+    
+    fig = go.Figure()
+    for i in range(n):
+        fig.add_trace(go.Barpolar(
+            r=[weights[i]],
+            theta=[np.degrees(theta[i])],
+            width=[np.degrees(width)],
+            marker_color=colors[i],
+            marker_line_color="white",
+            marker_line_width=2,
+            name=cats[i],
+            hoverinfo="text",
+            text=f"{cats[i]}: {weights[i]:.1%}",
+        ))
+    
+    fig.update_layout(
+        polar=dict(
+            radialaxis=dict(visible=False, range=[0, max(weights) * 1.3]),
+            angularaxis=dict(visible=False),
+        ),
+        showlegend=True,
+        title="QDWA Category Chord (Radial)",
+        height=420,
+        margin=dict(l=40, r=40, t=50, b=40),
+    )
+    st.plotly_chart(apply_qdwa_pub_style(fig, is_axial=False), use_container_width=True)
+    
+    # --- Heatmap of weight decomposition ---
+    st.markdown("#### Category Interaction Heatmap")
+    render_qdwa_heatmap(df, scale)
+
+def render_qdwa_heatmap(df: pd.DataFrame, scale: List[str]):
+    """
+    Heatmap showing:
+      - Row 1: Final weights
+      - Row 2: Raw cosine similarities
+      - Row 3: Keyword hit counts (normalized)
+    """
+    cats = list(df["Short Name"])
+    # Build a 3×4 matrix
+    matrix = np.array([
+        list(df["Weight"]),
+        list(df["Raw Similarity"]),
+        list(df["Keyword Hits"] / (df["Keyword Hits"].max() + 1)),  # normalized
+    ])
+    
+    fig = go.Figure(go.Heatmap(
+        z=matrix,
+        x=cats,
+        y=["Final Weight", "Raw Cosine Sim", "Keyword Hits (norm)"],
+        colorscale=scale,
+        texttemplate="%{z:.3f}",
+        textfont=dict(size=14, color="white"),
+        hovertemplate=(
+            "<b>%{y}</b> × <b>%{x}</b><br>Value: %{z:.4f}<extra></extra>"
+        ),
+        showscale=True,
+        colorbar=dict(title="Value"),
+    ))
+    
+    # Highlight major category column with a vertical rectangle
+    major_idx = df.index[df["Is Major"]][0]
+    fig.add_vrect(
+        x0=major_idx - 0.45, x1=major_idx + 0.45,
+        line_width=3, line_color="#FFD700",
+        fillcolor="#FFD700", opacity=0.08,
+    )
+    
+    fig.update_layout(
+        title="QDWA Weight Decomposition Heatmap (⭐ = major column)",
+        height=260,
+        margin=dict(l=140, r=40, t=50, b=30),
+        xaxis_side="bottom",
+    )
+    
+    st.plotly_chart(apply_qdwa_pub_style(fig), use_container_width=True)
+
+# ============================================================================
 # QUERY ANALYSIS DATA STRUCTURES
 # ============================================================================
 @dataclass
@@ -7548,372 +7860,138 @@ def run_qdwa_and_show_weights(qdwa: QDWAWeightAllocator, query: str):
 
     return df, major_cat, major_w
 
-#
-def render_qdwa_sankey(df: pd.DataFrame, query: str):
-    """Sankey: Query → 4 Categories → Individual Concepts."""
-    # Node labels
-    labels = [f"Query:\n{query[:40]}…"] + list(df["Short Name"])
-    # Source / target / value indices
-    sources = [0, 0, 0, 0]
-    targets = [1, 2, 3, 4]
-    values  = list(df["Weight"])
-    colors  = list(df["Color"])
-
-    node_colors = ["#6366F1"] + colors
-
-    # ✅ Convert hex to rgba strings (Plotly-safe)
-    link_colors = []
-    for c in colors:
-        if isinstance(c, str) and c.startswith('#') and len(c) == 7:
-            r = int(c[1:3], 16)
-            g = int(c[3:5], 16)
-            b = int(c[5:7], 16)
-            link_colors.append(f"rgba({r},{g},{b},0.5)")   # 50% alpha
-        else:
-            link_colors.append(c)   # fallback for unexpected formats
-
-    fig = go.Figure(
-        data=[go.Sankey(
-            arrangement="snap",
-            node=dict(
-                pad=20, thickness=30,
-                label=labels,
-                color=node_colors,
-            ),
-            link=dict(
-                source=sources, target=targets,
-                value=values, color=link_colors,
-            ),
-        )]
-    )
-    fig.update_layout(
-        title="QDWA Weight Flow (Query → Categories)",
-        height=350, margin=dict(l=10, r=10, t=40, b=10),
-        font=dict(size=13),
-    )
-    st.plotly_chart(fig, use_container_width=True)
-
-
-
-def render_qdwa_chord(df: pd.DataFrame):
-    """
-    Chord-style diagram: since Plotly lacks a native chord, we use a
-    circular arc + ribbon approach with go.Scatter polar, plus an
-    all-pairs heatmap as the practical alternative.
-    """
-    cats = list(df["Short Name"])
-    weights = list(df["Weight"])
-    colors = list(df["Color"])
-    n = len(cats)
-
-    # --- Approach A: Circular bar (radial) as chord approximation ---
-    theta = np.linspace(0, 2 * np.pi, n, endpoint=False)
-    width = 2 * np.pi / n * 0.75
-
-    fig = go.Figure()
-    for i in range(n):
-        fig.add_trace(go.Barpolar(
-            r=[weights[i]],
-            theta=[np.degrees(theta[i])],
-            width=[np.degrees(width)],
-            marker_color=colors[i],
-            marker_line_color="white",
-            marker_line_width=2,
-            name=cats[i],
-            hoverinfo="text",
-            text=f"{cats[i]}: {weights[i]:.1%}",
-        ))
-
-    fig.update_layout(
-        polar=dict(
-            radialaxis=dict(visible=False, range=[0, max(weights) * 1.3]),
-            angularaxis=dict(visible=False),
-        ),
-        showlegend=True,
-        title="QDWA Category Chord (Radial)",
-        height=420,
-        margin=dict(l=40, r=40, t=50, b=40),
-    )
-    st.plotly_chart(fig, use_container_width=True)
-
-    # --- Approach B: All-pairs weight interaction heatmap ---
-    st.markdown("#### Category Interaction Heatmap")
-    render_qdwa_heatmap(df)
-
-
-def render_qdwa_bar(df: pd.DataFrame):
-    """Horizontal bar chart; major category gets a glow border."""
-    sorted_df = df.sort_values("Weight", ascending=True)
-    colors = []
-    border_colors = []
-    border_widths = []
-    for _, row in sorted_df.iterrows():
-        colors.append(row["Color"])
-        if row["Is Major"]:
-            border_colors.append("#FFD700")
-            border_widths.append(4)
-        else:
-            border_colors.append(row["Color"])
-            border_widths.append(1)
-
-    fig = go.Figure(go.Bar(
-        x=sorted_df["Weight"],
-        y=sorted_df["Short Name"],
-        orientation="h",
-        marker_color=colors,
-        marker_line_color=border_colors,
-        marker_line_width=border_widths,
-        text=sorted_df["Weight"].map("{:.1%}".format),
-        textposition="outside",
-        hovertemplate=(
-            "<b>%{y}</b><br>Weight: %{x:.4f}<extra></extra>"
-        ),
-    ))
-
-    # Annotate major
-    major_row = sorted_df[sorted_df["Is Major"]].iloc[0]
-    fig.add_annotation(
-        x=major_row["Weight"],
-        y=major_row["Short Name"],
-        text="⭐ MAJOR",
-        showarrow=True,
-        arrowhead=2,
-        ax=40, ay=0,
-        font=dict(size=13, color="#FFD700", family="sans-serif"),
-    )
-
-    fig.update_layout(
-        title="QDWA Category Weights (Major Highlighted ⭐)",
-        xaxis_title="Weight",
-        xaxis_range=[0, max(sorted_df["Weight"]) * 1.35],
-        height=300,
-        margin=dict(l=120, r=60, t=50, b=30),
-        showlegend=False,
-    )
-    st.plotly_chart(fig, use_container_width=True)
-
-
-def render_qdwa_heatmap(df: pd.DataFrame):
-    """
-    Heatmap showing:
-      - Row 1: Final weights
-      - Row 2: Raw cosine similarities
-      - Row 3: Keyword hit counts (normalized)
-    """
-    cats = list(df["Short Name"])
-    # Build a 3×4 matrix
-    matrix = np.array([
-        list(df["Weight"]),
-        list(df["Raw Similarity"]),
-        list(df["Keyword Hits"] / (df["Keyword Hits"].max() + 1)),  # normalized
-    ])
-
-    fig = go.Figure(go.Heatmap(
-        z=matrix,
-        x=cats,
-        y=["Final Weight", "Raw Cosine Sim", "Keyword Hits (norm)"],
-        colorscale="Blues",
-        texttemplate="%{z:.3f}",
-        textfont=dict(size=14, color="white"),
-        hovertemplate=(
-            "<b>%{y}</b> × <b>%{x}</b><br>Value: %{z:.4f}<extra></extra>"
-        ),
-        showscale=True,
-        colorbar=dict(title="Value"),
-    ))
-
-    # Highlight major category column with a shape
-    major_idx = df.index[df["Is Major"]][0]
-    fig.add_vrect(
-        x0=major_idx - 0.45, x1=major_idx + 0.45,
-        line_width=3, line_color="#FFD700",
-        fillcolor="#FFD700", opacity=0.08,
-    )
-
-    fig.update_layout(
-        title="QDWA Weight Decomposition Heatmap (⭐ = major column)",
-        height=260,
-        margin=dict(l=140, r=40, t=50, b=30),
-        xaxis_side="bottom",
-    )
-    st.plotly_chart(fig, use_container_width=True)
-
-
-def render_qdwa_radar(df: pd.DataFrame):
-    """Spider chart — excellent for showing which category dominates."""
-    cats = list(df["Short Name"])
-    weights = list(df["Weight"])
-    colors = list(df["Color"])
-    n = len(cats)
-
-    # Close the polygon
-    theta = np.linspace(0, 2 * np.pi, n, endpoint=False).tolist()
-    weights_closed = weights + [weights[0]]
-    theta_closed = theta + [theta[0]]
-
-    fig = go.Figure()
-
-    # Filled area
-    fig.add_trace(go.Scatterpolar(
-        r=weights_closed,
-        theta=theta_closed,
-        fill="toself",
-        fillcolor="rgba(99,102,241,0.25)",
-        line=dict(color="#6366F1", width=2),
-        name="Weight profile",
-        hovertemplate="<b>%{theta}</b><br>Weight: %{r:.4f}<extra></extra>",
-    ))
-
-    # Individual markers with category colors
-    for i in range(n):
-        fig.add_trace(go.Scatterpolar(
-            r=[weights[i]],
-            theta=[np.degrees(theta[i])],
-            mode="markers+text",
-            marker=dict(size=14, color=colors[i], line=dict(width=2, color="white")),
-            text=[f"{weights[i]:.1%}"],
-            textposition="top center",
-            textfont=dict(size=12, color=colors[i]),
-            name=cats[i],
-            showlegend=False,
-            hoverinfo="skip",
-        ))
-
-    fig.update_layout(
-        polar=dict(
-            radialaxis=dict(visible=True, range=[0, max(weights) * 1.4]),
-            angularaxis=dict(tickfont=dict(size=12)),
-        ),
-        showlegend=False,
-        title="QDWA Weight Radar",
-        height=420,
-        margin=dict(l=60, r=60, t=50, b=40),
-    )
-    st.plotly_chart(fig, use_container_width=True)
-
-
-def render_qdwa_donut(df: pd.DataFrame):
-    """Donut chart; major slice is 'exploded' outward."""
-    cats = list(df["Short Name"])
-    weights = list(df["Weight"])
-    colors = list(df["Color"])
-    major_cat = df.loc[df["Is Major"], "Short Name"].iloc[0]
-
-    # Explode the major slice
-    pull = [0.12 if c == major_cat else 0 for c in cats]
-
-    fig = go.Figure(go.Pie(
-        labels=[f"{c}\n({w:.1%})" for c, w in zip(cats, weights)],
-        values=weights,
-        marker_colors=colors,
-        hole=0.50,
-        pull=pull,
-        textfont=dict(size=13),
-        hovertemplate="<b>%{label}</b><br>Weight: %{value:.4f}<extra></extra>",
-    ))
-
-    fig.add_annotation(
-        text=f"⭐ {major_cat}",
-        x=0.5, y=0.5,
-        font=dict(size=16, color="#FFD700", family="sans-serif"),
-        showarrow=False,
-    )
-
-    fig.update_layout(
-        title="QDWA Weight Distribution (Donut)",
-        height=400,
-        margin=dict(l=20, r=20, t=50, b=20),
-        showlegend=True,
-        legend=dict(font=dict(size=12)),
-    )
-    st.plotly_chart(fig, use_container_width=True)
-
+# ============================================================================
+# ENHANCED render_qdwa_tab (Methodology + Math + Customization)
+# ============================================================================
 
 def render_qdwa_tab(qdwa: QDWAWeightAllocator, query: str, metrics: RunMetricsLogger):
-    """Full tab: compute weights → numeric cards → 6 chart types."""
-
+    """Full tab: compute weights → methodology highlight → charts → math."""
     metrics.start_step("QDWA weight computation")
     df, major_cat, major_w = run_qdwa_and_show_weights(qdwa, query)
     metrics.end_step(extra={"major": major_cat, "major_weight": major_w})
-
+    
+    # --- Customization Panel ---
+    render_qdwa_customization_panel()
+    
+    # --- Methodology & Category Dominance Highlight ---
+    st.markdown("### 🧠 Methodology & Category Dominance")
+    W = qdwa.weights
+    H = -sum(w * math.log(w) for w in W.values() if w > 1e-12)
+    c = float(np.clip(1.0 - H / math.log(4), 0.0, 1.0))
+    
+    col_m1, col_m2 = st.columns([2, 1])
+    with col_m1:
+        if c > 0.6:
+            st.markdown(f"""
+            <div style="padding: 15px; border-radius: 8px; background: rgba(16, 185, 129, 0.1); border-left: 5px solid #10B981;">
+                <h4 style="margin:0; color:#065F46;">🎯 Major Category Focus (Specialized)</h4>
+                <p style="margin:5px 0 0 0; color:#047857;">
+                    The query is heavily dominated by <b>{major_cat}</b> ({major_w:.1%}). 
+                    The system will prioritize deep-dive experts and causal chains in this domain.
+                </p>
+            </div>
+            """, unsafe_allow_html=True)
+        elif c < 0.4:
+            st.markdown(f"""
+            <div style="padding: 15px; border-radius: 8px; background: rgba(59, 130, 246, 0.1); border-left: 5px solid #3B82F6;">
+                <h4 style="margin:0; color:#1E3A8A;">🌐 Plural / Multi-Disciplinary</h4>
+                <p style="margin:5px 0 0 0; color:#1E40AF;">
+                    The query spans multiple domains relatively equally. The system will activate cross-domain bridge concepts and broad routing.
+                </p>
+            </div>
+            """, unsafe_allow_html=True)
+        else:
+            st.markdown(f"""
+            <div style="padding: 15px; border-radius: 8px; background: rgba(245, 158, 11, 0.1); border-left: 5px solid #F59E0B;">
+                <h4 style="margin:0; color:#78350F;">⚖️ Balanced Distribution</h4>
+                <p style="margin:5px 0 0 0; color:#92400E;">
+                    The query has a primary focus on <b>{major_cat}</b> but maintains strong relevance to secondary categories.
+                </p>
+            </div>
+            """, unsafe_allow_html=True)
+    with col_m2:
+        st.metric("Concentration Index ($c$)", f"{c:.3f}")
+        st.caption("1.0 = Single Category\n0.0 = Uniform Plural")
+        
     st.markdown("---")
-
+    
     # --- Chart selector ---
-    chart_options = [
-        "📊 Bar Chart",
-        "🍩 Donut Chart",
-        "🕸️ Radar / Spider",
-        "🔄 Sankey Flow",
-        "🎛️ Chord (Radial)",
-        "🔥 Heatmap",
-        "📈 All Charts (Gallery)",
-    ]
+    chart_options = ["📊 Bar Chart", "🍩 Donut Chart", "🕸️ Radar / Spider", "🔄 Sankey Flow", "🎛️ Chord (Radial)", "🔥 Heatmap", "📈 All Charts (Gallery)"]
     chosen = st.selectbox("Select visualization", chart_options, index=0)
-
     metrics.start_step(f"QDWA chart: {chosen}")
-    if "Bar" in chosen:
-        render_qdwa_bar(df)
-    elif "Donut" in chosen:
-        render_qdwa_donut(df)
-    elif "Radar" in chosen:
-        render_qdwa_radar(df)
-    elif "Sankey" in chosen:
-        render_qdwa_sankey(df, query)
-    elif "Chord" in chosen:
-        render_qdwa_chord(df)
-    elif "Heatmap" in chosen:
-        render_qdwa_heatmap(df)
+    
+    scale = plotly_continuous_scale(st.session_state.get("qdwa_cmap", "viridis"))
+    
+    if "Bar" in chosen: 
+        render_qdwa_bar(df, scale)
+    elif "Donut" in chosen: 
+        render_qdwa_donut(df, scale)
+    elif "Radar" in chosen: 
+        render_qdwa_radar(df, scale)
+    elif "Sankey" in chosen: 
+        render_qdwa_sankey(df, query, scale)
+    elif "Chord" in chosen: 
+        render_qdwa_chord(df, scale)
+    elif "Heatmap" in chosen: 
+        render_qdwa_heatmap(df, scale)
     elif "Gallery" in chosen:
         c1, c2 = st.columns(2)
-        with c1:
-            render_qdwa_bar(df)
-        with c2:
-            render_qdwa_donut(df)
-        render_qdwa_radar(df)
+        with c1: 
+            render_qdwa_bar(df, scale)
+        with c2: 
+            render_qdwa_donut(df, scale)
+        render_qdwa_radar(df, scale)
         c3, c4 = st.columns(2)
-        with c3:
-            render_qdwa_sankey(df, query)
-        with c4:
-            render_qdwa_heatmap(df)
+        with c3: 
+            render_qdwa_sankey(df, query, scale)
+        with c4: 
+            render_qdwa_heatmap(df, scale)
     metrics.end_step()
-
-    # --- Mathematical explanation expander ---
-    with st.expander("🧮 QDWA Mathematics Explained", expanded=False):
-        st.markdown(f"""
-        **Stage 1 — Query Embedding:**
-        $$\\mathbf{{e}}_q = f_{{\\text{{enc}}}}(q) \\in \\mathbb{{R}}^d$$
-
-        **Stage 2 — Category Centroids:**
-        $$\\mathbf{{e}}_{{c_i}} = \\frac{{1}}{{|S_{{c_i}}|}} \\sum_{{j \\in S_{{c_i}}}} \\mathbf{{e}}_j$$
-
-        **Stage 3 — Cosine Similarity:**
-        $$s_i = \\frac{{\\mathbf{{e}}_q \\cdot \\mathbf{{e}}_{{c_i}}}}{{\\|\\mathbf{{e}}_q\\| \\, \\|\\mathbf{{e}}_{{c_i}}\\|}}$$
-
-        **Stage 4 — Temperature-Softmax:**
-        $$\\alpha_i = \\frac{{\\exp(s_i / \\tau)}}{{\\sum_{{j=1}}^{4} \\exp(s_j / \\tau)}}$$
-
-        **Stage 5 — Keyword Boost:**
-        $$\\alpha_i^{{\\text{{final}}}} = \\frac{{\\alpha_i \\cdot (1 + \\beta \\cdot k_i)}}{{\\sum_{{j}} \\alpha_j \\cdot (1 + \\beta \\cdot k_j)}}$$
-
-        | Parameter | Value | Meaning |
-        |-----------|-------|---------|
-        | τ (temperature) | 0.15 | Low → sharper distribution |
-        | β (boost) | 0.30 | Per-keyword-hit multiplier |
-        | k_i | {dict(qdwa.keyword_hits)} | Keyword matches in category i |
+    
+    # --- Robust Mathematical Explanation ---
+    with st.expander("🧮 QDWA Mathematical Framework (Robust Explanation)", expanded=False):
+        st.markdown(r"""
+        #### 🧮 QDWA Mathematical Framework
+        The Query Distillation & Weighted Allocation (QDWA) strategy maps a natural language query $\mathbf{q}$ to a 4-dimensional weight vector $\mathbf{W} = [\alpha_1, \alpha_2, \alpha_3, \alpha_4]$ representing relevance to Hardware, Flight Control, Thermal, and Maintenance domains.
+        
+        **Stage 1: Query Embedding**
+        $$ \mathbf{e}_q = f_{\text{enc}}(\mathbf{q}) \in \mathbb{R}^d $$
+        *Intuition:* The query is mapped to a dense semantic vector using a SentenceTransformer.
+        
+        **Stage 2: Category Centroids**
+        $$ \mathbf{e}_{c_i} = \frac{1}{|S_i|} \sum_{j \in S_i} \mathbf{e}_j, \quad \hat{\mathbf{e}}_{c_i} = \frac{\mathbf{e}_{c_i}}{\|\mathbf{e}_{c_i}\|_2} $$
+        *Intuition:* Each category is represented by the normalized mean of its seed concept embeddings.
+        
+        **Stage 3: Cosine Similarity & Temperature Softmax**
+        $$ s_i = \hat{\mathbf{e}}_q \cdot \hat{\mathbf{e}}_{c_i}, \quad \alpha_i = \frac{\exp(s_i / \tau)}{\sum_{j=1}^4 \exp(s_j / \tau)} $$
+        *Intuition:* $\tau$ (temperature) controls the "sharpness" of the distribution. Low $\tau$ yields a one-hot-like distribution (strong major category), while high $\tau$ yields a uniform distribution (plural).
+        
+        **Stage 4: Keyword Evidence Boost**
+        $$ \alpha_i^{\text{final}} = \frac{\alpha_i (1 + \beta \cdot k_i)}{\sum_j \alpha_j (1 + \beta \cdot k_j)} $$
+        *Intuition:* $\beta$ (boost) amplifies categories where exact domain keywords $k_i$ are found in the query, grounding the semantic similarity in explicit terminology.
+        
+        **Stage 5: Concentration & Routing Depth**
+        $$ H(\mathbf{W}) = -\sum_{i=1}^4 \alpha_i^{\text{final}} \log(\alpha_i^{\text{final}}), \quad c = 1 - \frac{H(\mathbf{W})}{\log 4} $$
+        *Intuition:* $c \in [0, 1]$ measures category dominance. $c \to 1$ implies a single major category (specialized routing, depth $K=4$). $c \to 0$ implies a plural query (broad routing, depth $K=2$).
         """)
-
+        st.markdown(f"""
+        | Parameter | Current Value | Meaning |
+        |-----------|-------|---------|
+        | τ (temperature) | {qdwa.temperature} | Low → sharper distribution |
+        | β (boost) | {qdwa.keyword_boost} | Per-keyword-hit multiplier |
+        | $k_i$ (keyword hits) | {dict(qdwa.keyword_hits)} | Exact matches in category $i$ |
+        | $c$ (concentration) | {c:.3f} | Dominance index |
+        """)
+        
     # --- Download weights as CSV ---
     csv = df.drop(columns=["Color"]).to_csv(index=False)
-    st.download_button(
-        "⬇️ Download weights CSV",
-        csv.encode("utf-8"),
-        file_name=f"qdwa_weights_{hashlib.md5(query.encode()).hexdigest()[:8]}.csv",
-        mime="text/csv",
-    )
+    st.download_button("⬇️ Download weights CSV", csv.encode("utf-8"), 
+                       file_name=f"qdwa_weights_{hashlib.md5(query.encode()).hexdigest()[:8]}.csv", 
+                       mime="text/csv")
 
 
 # ============================================================================
-# MAIN APPLICATION
+# LLM QUERY PANEL (Sidebar)
 # ============================================================================
 def render_llm_query_panel(ontology: Any, expander: DynamicOntologyExpander, full_graph: nx.Graph) -> Optional[QueryAnalysisResult]:
     st.sidebar.markdown("---")
@@ -7948,7 +8026,14 @@ def render_llm_query_panel(ontology: Any, expander: DynamicOntologyExpander, ful
 
     example_queries = [q for pdef in BATTERY_PROBLEM_DEFINITIONS.values() for q in pdef.example_queries[:1]]
     selected_example = st.sidebar.selectbox("Or select an example:", [""] + example_queries, key="example_query_select")
-    query = st.sidebar.text_area("Your question about drone battery optimization:", value=selected_example, height=100, key="llm_query_input", placeholder="e.g., How does pre-heating affect battery performance?")
+    
+    # SYNC DEFAULT QUERY WITH QDWA TAB
+    query = st.sidebar.text_area(
+        "Your question about drone battery optimization:", 
+        value="How does pre-heating affect battery performance in cold weather?",
+        height=100, key="llm_query_input", 
+        placeholder="e.g., How does pre-heating affect battery performance?"
+    )
 
     submitted = st.sidebar.button("🚀 Analyze & Expand Ontology", type="primary", key="llm_submit")
     if not submitted or not query.strip():
@@ -8239,6 +8324,9 @@ class QueryDrivenVisualizer:
             return Path(f.name).read_text(encoding='utf-8')
 
 
+# ============================================================================
+# SIDEBAR RENDERING
+# ============================================================================
 def render_sidebar() -> None:
     with st.sidebar:
         st.header("⚙️ Configuration v6.1 + QDWA")
@@ -9114,18 +9202,56 @@ def main() -> None:
         df_filtered = data.get("df_filtered", pd.DataFrame())
         selected_text_cols = data.get("selected_text_cols", [])
         cmap = st.session_state.get('cmap_name', 'viridis')
-
         has_reasoning = "ontology" in data
-        tab_names = ["📊 Visualization", "🧪 Distillation", "🎯 Research Directions", "✅ Validation", "📥 Export", "📈 Extra Viz", "🔬 Advanced Analytics"]
-        if has_reasoning: tab_names.append("🧠 Reasoning Dashboard")
+
+        # ------------------------------------------------------------------
+        # UPDATED TAB ORDER: QDWA FIRST
+        # ------------------------------------------------------------------
+        tab_names = [
+            "🎯 QDWA Weights",          # <--- MOVED TO FIRST
+            "📊 Visualization", 
+            "🧪 Distillation", 
+            "🎯 Research Directions", 
+            "✅ Validation", 
+            "📥 Export", 
+            "📈 Extra Viz", 
+            "🔬 Advanced Analytics"
+        ]
+        if has_reasoning: 
+            tab_names.append("🧠 Reasoning Dashboard")
         tab_names.append("🧠 Microtransformer #2")
         tab_names.append("🤖 LLM-Guided Q&A")
         tab_names.append("📊 Computational Metrics")
-        tab_names.append("🎯 QDWA Weights")
         tabs = st.tabs(tab_names)
-        tab_idx = 0
 
-        with tabs[tab_idx]:
+        # ------------------------------------------------------------------
+        # TAB 0: QDWA WEIGHTS (Immediate cognitive entry)
+        # ------------------------------------------------------------------
+        with tabs[0]:
+            st.header("🎯 Query Distillation & Weighted Allocation")
+            st.caption("Enter a query about drone battery optimization to see how QDWA allocates relevance weight across the four domain categories.")
+            encoder = load_embedding_model()
+            ontology = st.session_state.ontology
+            if "qdwa_allocator" not in st.session_state:
+                st.session_state.qdwa_allocator = init_qdwa_allocator(ontology, encoder)
+            qdwa = st.session_state.qdwa_allocator
+
+            # Default query synced with LLM sidebar
+            qdwa_query = st.text_input(
+                "QDWA Query",
+                value="How does pre-heating affect battery performance in cold weather?",
+                key="qdwa_query_input",
+            )
+
+            if not qdwa_query.strip():
+                st.info("Type a query above to compute QDWA weights.")
+            else:
+                render_qdwa_tab(qdwa, qdwa_query.strip(), get_metrics_logger())
+
+        # ------------------------------------------------------------------
+        # TAB 1: VISUALIZATION
+        # ------------------------------------------------------------------
+        with tabs[1]:
             st.subheader("Interactive Concept Graph")
             if nx_graph.number_of_nodes() == 0:
                 st.warning("No nodes to display.")
@@ -9184,21 +9310,22 @@ def main() -> None:
                     font_size=radar_font
                 )
 
-        tab_idx += 1
-        with tabs[tab_idx]:
+        # --- Remaining tabs (unchanged, just shift indices) ---
+        # TAB 2: Distillation
+        with tabs[2]:
             st.subheader("Concept Distillation Efficiency")
             display_df = distill_df.head(st.slider("Show Top N", 10, min(200, len(distill_df)), 50, key="distill_top_n"))
             st.dataframe(display_df, use_container_width=True)
             st.bar_chart(display_df.set_index('concept')[['distillation_efficiency']])
 
-        tab_idx += 1
-        with tabs[tab_idx]:
+        # TAB 3: Research Directions
+        with tabs[3]:
             st.subheader("Top Research Direction Recommendations")
             if not top_scores.empty:
                 st.dataframe(top_scores[['concept_u', 'concept_v', 'composite_score', 'gnn_affinity', 'semantic_novelty', 'expected_property_gain', 'feasibility_score']].head(20), use_container_width=True)
 
-        tab_idx += 1
-        with tabs[tab_idx]:
+        # TAB 4: Validation
+        with tabs[4]:
             st.subheader("Mathematical Validation")
             val_metrics = validate_graph_metrics(nx_graph, valid_concepts)
             col1, col2, col3, col4 = st.columns(4)
@@ -9207,69 +9334,48 @@ def main() -> None:
             col3.metric("Communities", val_metrics.get('n_communities', 0))
             col4.metric("Significant Edges", val_metrics.get('edge_significant_count', 0))
 
-        tab_idx += 1
-        with tabs[tab_idx]:
+        # TAB 5: Export
+        with tabs[5]:
             st.subheader("Export & Post-Processing")
             if st.button("Generate Markdown Report"):
                 report = generate_analysis_report(nx_graph, valid_concepts, concept_abstract_map, top_scores, distill_df, st.session_state.get('burst_df'), st.session_state.get('drift_df'), st.session_state.get('genealogy_df'), st.session_state.get('bridge_df'), st.session_state.get('motifs'), val_metrics, df_filtered)
                 st.download_button("📄 Download Report", data=report.encode('utf-8'), file_name="battery_report.md", mime="text/markdown")
 
-        tab_idx += 1
-        with tabs[tab_idx]:
+        # TAB 6: Extra Viz
+        with tabs[6]:
             st.subheader("Extra Visualizations")
             render_concept_timeline(df_filtered, valid_concepts, concept_abstract_map, theme=theme)
             render_cooccurrence_heatmap(nx_graph, valid_concepts, concept_abstract_map, theme=theme)
 
-        tab_idx += 1
-        with tabs[tab_idx]:
+        # TAB 7: Advanced Analytics
+        with tabs[7]:
             st.subheader("Advanced Analytics")
             if st.session_state.get('burst_df') is not None:
                 st.dataframe(st.session_state.burst_df.head(20), use_container_width=True)
 
+        # TAB 8: Reasoning Dashboard (if available)
+        idx = 8
         if has_reasoning:
-            tab_idx += 1
-            with tabs[tab_idx]:
+            with tabs[idx]:
                 render_reasoning_dashboard(nx_graph, valid_concepts, data.get("ontology"), data.get("extractor"))
+            idx += 1
 
-        tab_idx += 1
-        with tabs[tab_idx]:
+        # TAB 9: Microtransformer #2
+        with tabs[idx]:
             render_microtransformer_kg_rag_tab(st.session_state.analysis_data, st.session_state.ontology)
+        idx += 1
 
-        tab_idx += 1
-        with tabs[tab_idx]:
+        # TAB 10: LLM-Guided Q&A
+        with tabs[idx]:
             if "ontology" in st.session_state.analysis_data:
                 render_llm_qa_tab(st.session_state.analysis_data, st.session_state.analysis_data["ontology"])
             else:
                 st.info("Please build the concept graph with ontology enabled first.")
+        idx += 1
 
-        tab_idx += 1
-        with tabs[tab_idx]:
+        # TAB 11: Computational Metrics
+        with tabs[idx]:
             render_metrics_dashboard(get_metrics_logger())
-
-        tab_idx += 1
-        with tabs[tab_idx]:
-            st.header("🎯 Query Distillation & Weighted Allocation")
-            st.caption(
-                "Enter a query about drone battery optimization to see how QDWA "
-                "allocates relevance weight across the four domain categories."
-            )
-
-            encoder = load_embedding_model()
-            ontology = st.session_state.ontology
-            if "qdwa_allocator" not in st.session_state:
-                st.session_state.qdwa_allocator = init_qdwa_allocator(ontology, encoder)
-            qdwa = st.session_state.qdwa_allocator
-
-            qdwa_query = st.text_input(
-                "QDWA Query",
-                value="How does thermal management affect LiPo battery cycle life during fast charging?",
-                key="qdwa_query_input",
-            )
-
-            if not qdwa_query.strip():
-                st.info("Type a query above to compute QDWA weights.")
-            else:
-                render_qdwa_tab(qdwa, qdwa_query.strip(), get_metrics_logger())
 
 
 if __name__ == "__main__":
