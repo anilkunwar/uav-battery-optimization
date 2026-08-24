@@ -2,6 +2,8 @@ S.N.,Category,Query,Acronym
 1, Thermal Management, Ways to mitigate the risk of thermal runaway in LiPo  batteries,CAT-TM1
 2, Flight Control & Trajectory Optimization, Planning the energy optimal drone path,CAT-FCTO1
 3,Hardware and System Architecture, Battery chemistry for high-power draw applications such as heavy lift freight,CAT-HSA1
+4,Hardware and System Architecture, Battery Management System (BMS) for mitigating voltage sag and improve State of Health (SoH) estimation under varying payload weights,CAT-HSA1
+4,Hardware and System Architecture, Optimal balance between energy density (Wh/kg), C-rating, and airframe weight when selecting cells for a heavy-lift freight drone,CAT-HSA1
 4,Charging and Maintenance Protocol,To extend battery cycle life through optimal charging and storage practices,CAT-CMP1
 5,Charging and Maintenance Protocol,What is the optimal charge rate (C-rate) and storage SOC to maximize drone battery longevity?,CAT-CMP2
 6,Charging and Maintenance Protocol, Effect of discharge thresholds and battery rotation strategiesin overall dronefleet battery health, CAT-CMP3
