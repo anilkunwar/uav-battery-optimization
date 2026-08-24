@@ -1,6 +1,8 @@
 S.N.,Category,Query,Acronym
 1, Thermal Management, Ways to mitigate the risk of thermal runaway in LiPo  batteries,CAT-TM1
-2, Flight Control & Trajectory Optimization, Planning the energy optimal drone path,CAT-FCTO1
+2, Flight Control & Trajectory Optimization, Incorporating real-time wind data and altitude changes in A* algorithm and Genetic Algorithm to optimize energy consumption during a mission,CAT-FCTO1
+3, Flight Control & Trajectory Optimization, Planning the energy optimal drone path, CAT-FCTO2
+3, Flight Control & Trajectory Optimization, "How do cruising velocity, throttle modulation, and propeller-motor matching collectively minimize power draw across different flight phases?", CAT-FCTO3
 3,Hardware and System Architecture, Battery chemistry for high-power draw applications such as heavy lift freight,CAT-HSA1
 4,Hardware and System Architecture, Battery Management System (BMS) for mitigating voltage sag and improve State of Health (SoH) estimation under varying payload weights,CAT-HSA1
 4,Hardware and System Architecture, "Optimal balance between energy density (Wh/kg, C-rating, and airframe weight when selecting cells for a heavy-lift freight drone",CAT-HSA1
