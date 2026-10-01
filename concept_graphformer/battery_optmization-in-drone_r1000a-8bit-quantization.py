@@ -1,5 +1,3 @@
-
-#!usrbinenv python
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
 """
@@ -8,6 +6,18 @@ Battery Optimization in Drone Systems Concept Graph v6.1 + QDWA
 Multi-level reasoning concept graph for battery optimization in drone systems,
 with the Query Distillation & Weighted Allocation (QDWA) strategy fully integrated.
 Focus: Hardware selection, flight algorithms, thermal management, operational practices.
+
+v6.2 patch notes
+----------------
+* Fixes StreamlitAPIException: "st.session_state.<key> cannot be modified after
+  the widget with key=<key> is instantiated."
+* Introduces `_MT_WIDGET_DEFAULTS` + `init_widget_defaults()` which seeds widget
+  keys BEFORE any widget is created. Widget panels (Microtransformer #2, QDWA)
+  no longer write to their own widget-backed session-state keys.
+* `render_microtransformer_postprocessing_panel`, `render_qdwa_customization_panel`
+  use callback-based resets and return their configuration dict directly.
+* `render_qdwa_tab` consumes the panel's returned dict instead of reading the
+  widget-backed key from `st.session_state`.
 """
 
 # ============================================================================
@@ -377,6 +387,64 @@ os.makedirs(JSON_METADATA_DIR, exist_ok=True)
 
 
 # ============================================================================
+# WIDGET SESSION-STATE DEFAULTS  (v6.2 FIX)
+# ----------------------------------------------------------------------------
+# Streamlit forbids writing to st.session_state[K] AFTER a widget with key=K has
+# been rendered during the same script run. The old code violated this rule in
+# several panels (notably `mt_cmap` and `qdwa_cmap`).
+#
+# The fix: seed every widget-backed key here, ONCE, BEFORE any widget is
+# created. `init_widget_defaults()` is called at the very top of `main()`.
+# ============================================================================
+_MT_WIDGET_DEFAULTS: Dict[str, Any] = {
+    # --- Microtransformer #2 chart customization ---
+    "mt_cmap": "viridis",
+    "mt_font_family": "Inter, Segoe UI, Roboto, sans-serif",
+    "mt_font_size": 11,
+    "mt_title_size": 15,
+    "mt_cbar_len": 0.8,
+    "mt_cbar_thick": 14,
+    "mt_cbar_title": "Weight",
+    "mt_show_grid": False,
+    "mt_seed": 42,
+
+    # --- Microtransformer #2 postprocessing panel ---
+    "mt_post_cmap": "viridis",
+    "mt_post_cmap_reverse": False,
+    "mt_post_font_size": 11,
+    "mt_post_title_size": 15,
+    "mt_post_sankey_pad": 15,
+    "mt_post_sankey_opacity": 0.4,
+    "mt_post_bar_text_pos": "outside",
+    "mt_post_bar_text_size": 12,
+
+    # --- QDWA customization ---
+    "qdwa_cmap": "viridis",
+    "qdwa_cmap_reverse": False,
+    "qdwa_post_font_size": 11,
+    "qdwa_post_title_size": 15,
+    "qdwa_post_font_family": "Inter, Segoe UI, Roboto, sans-serif",
+    "qdwa_post_sankey_pad": 20,
+    "qdwa_post_sankey_thick": 25,
+    "qdwa_post_sankey_opacity": 0.4,
+    "qdwa_post_bar_text_pos": "outside",
+    "qdwa_post_bar_text_size": 10,
+}
+
+
+def init_widget_defaults() -> None:
+    """Idempotently seed widget-backed keys in st.session_state.
+
+    MUST be called at the top of ``main()`` — before ``st.sidebar`` and before
+    any ``st.tabs()`` or widget inside them is instantiated. Writing to a
+    widget-backed key after its widget has rendered raises StreamlitAPIException.
+    """
+    for _k, _v in _MT_WIDGET_DEFAULTS.items():
+        if _k not in st.session_state:
+            st.session_state[_k] = _v
+
+
+# ============================================================================
 # COLORMAP REGISTRY (50+)
 # ============================================================================
 SUPPORTED_COLORMAPS = {
@@ -416,9 +484,6 @@ def get_colormap_colors(cmap_name: str, n: int) -> List[str]:
             return [matplotlib.colors.to_hex(cmap(i)) for i in range(n)]
 
 
-# ============================================================================
-# ROBUST FILE LOADER (JSON / JSONL / CSV / BibTeX)
-# ============================================================================
 # ============================================================================
 # MICROTRANSFORMER CHART STYLING HELPERS
 # ============================================================================
@@ -693,9 +758,6 @@ class RelationshipType(Enum):
     ENFORCES = "enforces"
     CORRELATES = "correlates"
 
-# ============================================================================
-# EDGE COLOR REGISTRY — one distinct color per RelationshipType category
-# ============================================================================
 
 # ============================================================================
 # RELATIONSHIP MAPPING FOR MICROTRANSFORMER
@@ -715,6 +777,7 @@ BATTERY_EXPERT_LABELS = [
     "Discharge Depth", "Cycle Life", "Fast Charging", "Storage SOC",
     "Temperature Effects", "Capacity Degradation", "Operational Practices"
 ]
+
 EDGE_COLOR_REGISTRY: Dict[RelationshipType, str] = {
     # --- Semantic / structural ---
     RelationshipType.SYNONYM:           "#AAAAAA",
@@ -735,7 +798,7 @@ EDGE_COLOR_REGISTRY: Dict[RelationshipType, str] = {
     RelationshipType.DRIVES:            "#DC143C",
     RelationshipType.ENABLES:           "#FF7F50",
 
-    # --- Phase / thermodynamic transitions (reused for state changes) ---
+    # --- Phase / thermodynamic transitions ---
     RelationshipType.TRANSITIONS_TO:    "#8A2BE2",
     RelationshipType.REPLACES:          "#9932CC",
     RelationshipType.FORMS:             "#9370DB",
@@ -1189,7 +1252,6 @@ class DomainOntology:
 def ensure_ontology_populated() -> "DomainOntology":
     """
     Returns a fully populated DomainOntology instance, re-initialising it if necessary.
-    Adapted from TE v1.0 to prevent empty dropdowns.
     """
     if "ontology" not in st.session_state or not st.session_state.ontology.concepts:
         st.session_state.ontology = DomainOntology()
@@ -1200,9 +1262,7 @@ def ensure_ontology_populated() -> "DomainOntology":
         st.session_state.ontology = DomainOntology()
     return st.session_state.ontology
 
-# ============================================================================
-# ADVANCED CONCEPT RESOLVER (AgNPs Pattern — Eager Precomputation)
-# ============================================================================
+
 # ============================================================================
 # HIERARCHY LABEL BUILDER — enriches flat concept names with ancestor path
 # ============================================================================
@@ -1407,20 +1467,6 @@ def get_battery_category_color(concept: str, cmap_colors=None) -> str:
     }
     return color_map.get(cat, '#7f7f7f')
 
-
-def ensure_ontology_populated() -> "DomainOntology":
-    """
-    Returns a fully populated DomainOntology instance, re-initialising it if necessary.
-    Adapted from TE v1.0 to prevent empty dropdowns.
-    """
-    if "ontology" not in st.session_state or not st.session_state.ontology.concepts:
-        st.session_state.ontology = DomainOntology()
-
-    ontology = st.session_state.ontology
-    has_property = any(node.concept_type == ConceptType.PROPERTY for node in ontology.concepts.values())
-    if not has_property:
-        st.session_state.ontology = DomainOntology()
-    return st.session_state.ontology
 
 # ============================================================================
 # ADVANCED CONCEPT RESOLVER
@@ -2865,7 +2911,6 @@ def detect_cross_domain_bridges(
     if not bridge_data:
         return pd.DataFrame(columns=_BRIDGE_COLUMNS)
     df = pd.DataFrame(bridge_data)
-    # Defensive: ensure column exists before sorting
     if "bridge_score" not in df.columns:
         df["bridge_score"] = 0.0
     return df.sort_values("bridge_score", ascending=False).reset_index(drop=True)
@@ -5108,43 +5153,88 @@ def render_reasoning_dashboard(
 
 
 # ============================================================================
-# BATCH PROCESSING MODE v6.0 (Streamlit Cloud ≤ 1 GB RAM)
-# ============================================================================
-# ============================================================================
 # MICROTRANSFORMER #2: UI RENDERING (with Battery expert labels)
+# ----------------------------------------------------------------------------
+# v6.2 FIX: The postprocessing panel no longer writes to widget-backed keys.
+# All widget keys are seeded by `init_widget_defaults()` at the top of main().
+# Resets happen inside `on_click` callbacks, which run *before* widgets render.
 # ============================================================================
 def render_microtransformer_postprocessing_panel() -> Dict[str, Any]:
-    """Postprocessing customization panel for Microtransformer visualizations."""
+    """Postprocessing customization panel for Microtransformer visualizations.
+
+    Returns a dict the caller consumes directly. The panel never writes to
+    a widget-backed session-state key outside of callbacks.
+    """
+
+    def _reset_mt_post_defaults() -> None:
+        for k in (
+            "mt_post_cmap",
+            "mt_post_cmap_reverse",
+            "mt_post_font_size",
+            "mt_post_title_size",
+            "mt_post_sankey_pad",
+            "mt_post_sankey_opacity",
+            "mt_post_bar_text_pos",
+            "mt_post_bar_text_size",
+        ):
+            st.session_state[k] = _MT_WIDGET_DEFAULTS[k]
+
     with st.expander("🎨 Microtransformer Visualization Customization", expanded=False):
         st.markdown("**Colormap & Theme**")
         col1, col2 = st.columns(2)
         with col1:
-            mt_cmap = st.selectbox("Colormap (Postprocessing)", options=list(SUPPORTED_COLORMAPS.keys()),
-                index=list(SUPPORTED_COLORMAPS.keys()).index(st.session_state.get("mt_cmap", "viridis")) if st.session_state.get("mt_cmap", "viridis") in SUPPORTED_COLORMAPS else 0, key="mt_post_cmap")
-            st.session_state["mt_cmap"] = mt_cmap
+            # NOTE: no manual write to st.session_state["mt_post_cmap"].
+            # The widget with key="mt_post_cmap" owns that key.
+            st.selectbox(
+                "Colormap (Postprocessing)",
+                options=list(SUPPORTED_COLORMAPS.keys()),
+                key="mt_post_cmap",
+            )
         with col2:
             st.checkbox("Reverse Colormap", key="mt_post_cmap_reverse")
 
         st.markdown("**Typography**")
         col3, col4 = st.columns(2)
-        with col3: st.slider("Font Size", 8, 24, 11, key="mt_post_font_size")
-        with col4: st.slider("Title Size", 12, 32, 15, key="mt_post_title_size")
+        with col3:
+            st.slider("Font Size", 8, 24, key="mt_post_font_size")
+        with col4:
+            st.slider("Title Size", 12, 32, key="mt_post_title_size")
 
         st.markdown("**Sankey & Bar Settings**")
-        col5, col6, col7 = st.columns(3)
-        with col5: st.slider("Sankey Node Padding", 5, 50, 15, key="mt_post_sankey_pad")
-        with col6: st.slider("Sankey Link Opacity", 0.1, 1.0, 0.4, key="mt_post_sankey_opacity")
-        with col7: st.selectbox("Bar Text Position", ["outside", "inside", "auto", "none"], key="mt_post_bar_text_pos")
+        col5, col6, col7, col8 = st.columns(4)
+        with col5:
+            st.slider("Sankey Node Padding", 5, 50, key="mt_post_sankey_pad")
+        with col6:
+            st.slider("Sankey Link Opacity", 0.1, 1.0, 0.4,
+                      step=0.05, key="mt_post_sankey_opacity")
+        with col7:
+            st.selectbox(
+                "Bar Text Position",
+                ["outside", "inside", "auto", "none"],
+                key="mt_post_bar_text_pos",
+            )
+        with col8:
+            st.slider("Bar Text Size", 6, 16, key="mt_post_bar_text_size")
+
+        st.button(
+            "🔄 Reset to Defaults",
+            key="mt_post_reset",
+            on_click=_reset_mt_post_defaults,
+        )
 
     return {
-        "cmap": st.session_state.get("mt_cmap", "viridis"),
+        "cmap": st.session_state.get("mt_post_cmap", "viridis"),
         "font_size": st.session_state.get("mt_post_font_size", 11),
         "title_size": st.session_state.get("mt_post_title_size", 15),
-        "font_family": st.session_state.get("mt_font_family", "Inter, Segoe UI, Roboto, sans-serif"),
+        "font_family": st.session_state.get(
+            "mt_font_family", "Inter, Segoe UI, Roboto, sans-serif"
+        ),
         "sankey_pad": st.session_state.get("mt_post_sankey_pad", 15),
         "sankey_opacity": st.session_state.get("mt_post_sankey_opacity", 0.4),
         "bar_text_position": st.session_state.get("mt_post_bar_text_pos", "outside"),
+        "bar_text_size": st.session_state.get("mt_post_bar_text_size", 12),
     }
+
 
 def render_chord_diagram(token_labels: List[str], routing_np: np.ndarray,
                          scale: List[str], theme: Dict) -> go.Figure:
@@ -5217,7 +5307,7 @@ def render_microtransformer_kg_rag_tab(analysis_data: Dict, ontology: DomainOnto
         st.error("Graph has fewer than 2 nodes.")
         return
 
-    # FIX: Added ConceptType.MODEL to the type_order so models aren't hidden
+    # Added ConceptType.MODEL so models aren't hidden
     type_order = [
         ConceptType.MATERIAL, ConceptType.PARAMETER, ConceptType.PHENOMENON,
         ConceptType.PROPERTY, ConceptType.PROCESS, ConceptType.METHOD,
@@ -5259,7 +5349,6 @@ def render_microtransformer_kg_rag_tab(analysis_data: Dict, ontology: DomainOnto
                 return option_str[:-len(marker)]
         return option_str
 
-    # Expanded regex patterns to catch bi-directional queries
     QUERY_CONCEPT_MAP = [
         (r"\blipo\b.*\befficiency\b", "lipo_battery", "motor_efficiency"),
         (r"\befficiency\b.*\blipo\b", "motor_efficiency", "lipo_battery"),
@@ -5351,25 +5440,53 @@ def render_microtransformer_kg_rag_tab(analysis_data: Dict, ontology: DomainOnto
     # --- CHART CUSTOMIZATION UI ---
     st.markdown("---")
     st.markdown("#### 🔬 Expert Routing Activation Analysis")
+
+    def _reset_mt_chart_defaults() -> None:
+        for k in (
+            "mt_cmap", "mt_font_family", "mt_font_size",
+            "mt_title_size", "mt_cbar_len", "mt_cbar_thick",
+            "mt_cbar_title", "mt_show_grid", "mt_seed",
+        ):
+            st.session_state[k] = _MT_WIDGET_DEFAULTS[k]
+
     with st.expander("🎨 Chart Customization (colormap, fonts, colorbar)", expanded=False):
         _cmaps = list(SUPPORTED_COLORMAPS.keys())
-        st.selectbox("Colormap:", options=_cmaps,
-                     index=_cmaps.index(st.session_state.get("mt_cmap", "viridis"))
-                     if st.session_state.get("mt_cmap", "viridis") in _cmaps else 0,
-                     key="mt_cmap",
-                     help="Sequential (viridis/inferno/turbo) best for heatmaps; jet/rainbow are popular but not colorblind-safe.")
-        st.selectbox("Font family (labels, ticks, colorbar):",
-                     ["Inter, Segoe UI, Roboto, sans-serif", "Arial, Helvetica, sans-serif",
-                      "Georgia, serif", "Courier New, monospace", "Times New Roman, serif"],
-                     key="mt_font_family")
+        # NOTE: no `index=...` and no manual write — the widget with
+        # key="mt_cmap" owns this key. Its initial value was seeded by
+        # init_widget_defaults() before any widget was created.
+        st.selectbox(
+            "Colormap:",
+            options=_cmaps,
+            key="mt_cmap",
+            help=(
+                "Sequential (viridis/inferno/turbo) best for heatmaps; "
+                "jet/rainbow are popular but not colorblind-safe."
+            ),
+        )
+        st.selectbox(
+            "Font family (labels, ticks, colorbar):",
+            [
+                "Inter, Segoe UI, Roboto, sans-serif",
+                "Arial, Helvetica, sans-serif",
+                "Georgia, serif",
+                "Courier New, monospace",
+                "Times New Roman, serif",
+            ],
+            key="mt_font_family",
+        )
         c1, c2, c3, c4 = st.columns(4)
-        c1.slider("Tick font size", 8, 20, 11, key="mt_font_size")
-        c2.slider("Title font size", 10, 26, 15, key="mt_title_size")
-        c3.slider("Colorbar length", 0.3, 1.0, 0.8, 0.05, key="mt_cbar_len")
-        c4.slider("Colorbar thickness (px)", 6, 40, 14, key="mt_cbar_thick")
-        st.text_input("Colorbar title", value="Weight", key="mt_cbar_title")
-        st.checkbox("Show gridlines", value=False, key="mt_show_grid")
-        st.number_input("Torch seed (reproducible demo)", 0, 9999, 42, key="mt_seed")
+        c1.slider("Tick font size", 8, 20, key="mt_font_size")
+        c2.slider("Title font size", 10, 26, key="mt_title_size")
+        c3.slider("Colorbar length", 0.3, 1.0, step=0.05, key="mt_cbar_len")
+        c4.slider("Colorbar thickness (px)", 6, 40, key="mt_cbar_thick")
+        st.text_input("Colorbar title", key="mt_cbar_title")
+        st.checkbox("Show gridlines", key="mt_show_grid")
+        st.number_input("Torch seed (reproducible demo)", 0, 9999, key="mt_seed")
+        st.button(
+            "🔄 Reset Chart Defaults",
+            key="mt_chart_reset",
+            on_click=_reset_mt_chart_defaults,
+        )
 
     if st.button("⚡ Run LatentMoE Inference on Path", type="primary"):
         if not selected_src or not selected_tgt:
@@ -5448,11 +5565,10 @@ def render_microtransformer_kg_rag_tab(analysis_data: Dict, ontology: DomainOnto
         theme = THEME_PRESETS.get(st.session_state.get("theme", "Bright (Default)"), THEME_PRESETS["Bright (Default)"])
         scale = plotly_continuous_scale(post_params.get("cmap", "viridis"))
 
-        # --- UPGRADE 1: Enhanced Heatmap with Custom Hovertext ---
+        # --- Enhanced Heatmap with Custom Hovertext ---
         st.markdown("#### 📊 Per‑Token Expert Routing Heatmap")
         per_token_df = pd.DataFrame(routing_np, index=token_labels, columns=BATTERY_EXPERT_LABELS)
 
-        # Create custom hovertext
         hover_text = []
         for i, token in enumerate(token_labels):
             token_row = []
@@ -5468,16 +5584,13 @@ def render_microtransformer_kg_rag_tab(analysis_data: Dict, ontology: DomainOnto
         fig_heat = px.imshow(
             per_token_df.T,
             labels=dict(x="Path Token", y="Expert Domain", color="Activation"),
-            color_continuous_scale=scale, 
-            aspect="auto", 
+            color_continuous_scale=scale,
+            aspect="auto",
             height=450
         )
 
-        # Apply custom hovertext
         fig_heat.update_traces(hoverinfo="text", text=hover_text, customdata=hover_text)
         fig_heat.update_layout(hovermode="closest")
-
-        # Apply postprocessing typography
         fig_heat.update_layout(
             font=dict(family=post_params.get("font_family"), size=post_params.get("font_size", 11), color=theme["font"]),
             title=dict(font=dict(size=post_params.get("title_size", 15)))
@@ -5485,42 +5598,36 @@ def render_microtransformer_kg_rag_tab(analysis_data: Dict, ontology: DomainOnto
 
         st.plotly_chart(apply_mt_chart_style(fig_heat, theme), use_container_width=True)
 
-        # --- UPGRADE 2: Sankey Diagram for Token -> Expert Flow ---
+        # --- Sankey / Chord ---
         st.markdown("#### 🌊 Token-to-Expert Routing Flow")
         chart_type = st.radio("Flow chart type:", ["Sankey", "Chord"], index=0, horizontal=True)
 
         if chart_type == "Sankey":
-            # Prepare labels (Tokens + Experts)
             sanky_tokens = [f"Token: {t}" for t in token_labels]
             sanky_experts = BATTERY_EXPERT_LABELS
             sankey_labels = sanky_tokens + sanky_experts
 
-            # Prepare sources, targets, and values
             sanky_sources = []
             sanky_targets = []
             sanky_values = []
 
-            # Only keep top 3 experts per token to avoid clutter
             for i, token in enumerate(sanky_tokens):
                 token_weights = routing_np[i]
-                top_indices = np.argsort(token_weights)[-3:][::-1]  # Top 3 experts
+                top_indices = np.argsort(token_weights)[-3:][::-1]
                 for idx in top_indices:
                     val = float(token_weights[idx])
-                    if val > 0: # Sankey requires positive values
+                    if val > 0:
                         sanky_sources.append(sankey_labels.index(token))
                         sanky_targets.append(sankey_labels.index(sanky_experts[idx]))
                         sanky_values.append(val)
 
-            # Assign colors
             token_colors = px.colors.qualitative.Pastel[:len(sanky_tokens)]
             expert_colors = scale[:len(sanky_experts)]
             node_colors = token_colors + expert_colors
 
-            # Create rgba link colors to add transparency
             link_colors = []
             for s in sanky_sources:
                 hex_color = node_colors[s]
-                # Handle both hex (#RRGGBB) and rgb(r,g,b) formats safely
                 if isinstance(hex_color, str) and hex_color.startswith('rgb('):
                     rgb_vals = hex_color[4:-1].split(',')
                     link_colors.append(f"rgba({rgb_vals[0].strip()},{rgb_vals[1].strip()},{rgb_vals[2].strip()},0.4)")
@@ -5533,24 +5640,23 @@ def render_microtransformer_kg_rag_tab(analysis_data: Dict, ontology: DomainOnto
                     link_colors.append("rgba(100,100,100,0.4)")
 
             fig_sankey = go.Figure(data=[go.Sankey(
-                node = dict(
-                  pad = post_params.get("sankey_pad", 15),
-                  thickness = 20,
-                  line = dict(color = "black", width = 0.5),
-                  label = sankey_labels,
-                  color = node_colors
+                node=dict(
+                    pad=post_params.get("sankey_pad", 15),
+                    thickness=20,
+                    line=dict(color="black", width=0.5),
+                    label=sankey_labels,
+                    color=node_colors
                 ),
-                link = dict(
-                  source = sanky_sources,
-                  target = sanky_targets,
-                  value = sanky_values,
-                  color = link_colors
+                link=dict(
+                    source=sanky_sources,
+                    target=sanky_targets,
+                    value=sanky_values,
+                    color=link_colors
                 )
             )])
 
-            # CRITICAL FIX: Sankey node labels inherit from layout font, NOT trace textfont
             fig_sankey.update_layout(
-                title_text="LatentMoE Routing Flow (Top 3 Experts per Token)", 
+                title_text="LatentMoE Routing Flow (Top 3 Experts per Token)",
                 height=500,
                 font=dict(
                     family=post_params.get("font_family", "Inter, Segoe UI, Roboto, sans-serif"),
@@ -5563,7 +5669,7 @@ def render_microtransformer_kg_rag_tab(analysis_data: Dict, ontology: DomainOnto
             fig_chord = render_chord_diagram(token_labels, routing_np, scale, theme)
             st.plotly_chart(apply_mt_chart_style(fig_chord, theme, is_axial=False), use_container_width=True)
 
-        # --- UPGRADE 3: Enhanced Bar Chart with Top-N Filtering & Text Labels ---
+        # --- Enhanced Bar Chart ---
         st.markdown("#### 📊 Averaged Expert Activation")
 
         df_experts = pd.DataFrame({
@@ -5571,7 +5677,6 @@ def render_microtransformer_kg_rag_tab(analysis_data: Dict, ontology: DomainOnto
             "Activation Weight": avg_weights,
         }).sort_values("Activation Weight", ascending=False)
 
-        # Filter to only show experts with significant activation (> 0.05)
         df_active = df_experts[df_experts["Activation Weight"] > 0.05].copy()
 
         if df_active.empty:
@@ -5588,16 +5693,15 @@ def render_microtransformer_kg_rag_tab(analysis_data: Dict, ontology: DomainOnto
             text=df_active["Activation Weight"].apply(lambda x: f"{x:.3f}")
         )
 
-        # Improve text positioning and layout
         fig.update_traces(
             textposition=post_params.get("bar_text_position", "outside"),
             textfont_size=post_params.get("bar_text_size", 12)
         )
         y_max = float(df_active["Activation Weight"].max()) if not df_active.empty else 1.0
         fig.update_layout(
-            xaxis_tickangle=-45, 
+            xaxis_tickangle=-45,
             height=450,
-            yaxis=dict(range=[0, y_max * 1.15]),  # Add headroom for labels
+            yaxis=dict(range=[0, y_max * 1.15]),
             font=dict(family=post_params.get("font_family"), size=post_params.get("font_size", 11), color=theme["font"])
         )
         st.plotly_chart(apply_mt_chart_style(fig, theme), use_container_width=True)
@@ -5609,7 +5713,6 @@ def render_microtransformer_kg_rag_tab(analysis_data: Dict, ontology: DomainOnto
             with cols[i]:
                 st.metric(row["Expert Domain"], f"{row['Activation Weight']:.3f}")
 
-        # Ported scientific interpretation from TE v1.0 (adapted to battery)
         st.markdown("#### 🔬 Scientific Interpretation")
         interpretation_map = {
             "Battery Chemistry": "Selecting the right chemistry (LiPo, Li-ion, Solid-State) for power vs. energy needs.",
@@ -5636,15 +5739,6 @@ def render_microtransformer_kg_rag_tab(analysis_data: Dict, ontology: DomainOnto
             token_experts = pd.DataFrame({"Expert": BATTERY_EXPERT_LABELS, "Weight": routing_np[i]}).sort_values("Weight", ascending=False)
             top2 = ", ".join(f"{row['Expert']} ({row['Weight']:.3f})" for _, row in token_experts.head(2).iterrows())
             st.markdown(f"**Step {i+1}**: `{src_name}` --[{rel_desc}]--> `{tgt_name}`  *(top experts: {top2})*")
-
-
-def get_memory_usage_mb() -> float:
-    try:
-        import resource
-        rss = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss
-        return rss / (1024 * 1024) if sys.platform == "darwin" else rss / 1024
-    except Exception:
-        return 0.0
 
 
 def split_into_batches(
@@ -5712,7 +5806,6 @@ def recompute_edge_weights(nx_graph: nx.Graph, config: Dict) -> None:
 
 def extract_doc_metrics(text: str) -> Dict[str, Any]:
     metrics: Dict[str, Any] = {}
-    # Extract potential battery-relevant numerical values
     power_matches = re.findall(r'(\d+(?:\.\d+)?)\s*(?:w|watt|kw)', text, re.I)
     if power_matches:
         metrics['power_w'] = [float(m) for m in power_matches]
@@ -5871,7 +5964,6 @@ def build_query_whitelist(st_session):
     whitelist.update(st_session.get('last_query_dynamic_concepts', set()))
     whitelist.update(st_session.get('last_query_bridge_concepts', {}).keys())
 
-    # --- AUTO-EXPANSION: pull in problem-definition concepts ---
     pdef = BATTERY_PROBLEM_DEFINITIONS.get(analysis.primary_problem)
     if pdef is not None:
         whitelist.update(pdef.key_concepts)
@@ -5881,12 +5973,10 @@ def build_query_whitelist(st_session):
         for src, _rel, tgt in pdef.key_relationships:
             whitelist.update([src, tgt])
 
-    # Intersect with what actually exists in the ontology
     ontology = st_session.get('ontology')
     if ontology is not None:
         whitelist = {c for c in whitelist if c in ontology.concepts}
 
-    # Floor: if still too small, expand by 1-hop ontology neighbors
     if len(whitelist) < 8 and ontology is not None:
         extra = set()
         for c in list(whitelist):
@@ -5903,7 +5993,6 @@ def build_query_whitelist(st_session):
                 extra.add(r.source)
         whitelist.update({c for c in extra if c in ontology.concepts})
 
-    # --- QDWA DEEP-DIVE: high concentration -> pull dominant category ---
     W = getattr(analysis, "category_weights", {})
     if (
         W
@@ -6614,7 +6703,7 @@ def compute_query_category_weights(
             if cat:
                 raw[cat] += hits
 
-    # 2. Problem-definition mass injection (fixes the numerical caveat)
+    # 2. Problem-definition mass injection
     if primary_problem is not None:
         pdef = BATTERY_PROBLEM_DEFINITIONS.get(primary_problem)
         if pdef is not None:
@@ -6655,65 +6744,107 @@ def render_category_weight_gauge(
 
 # ============================================================================
 # QDWA CHART CUSTOMIZATION HELPERS (Publication-Quality)
+# ----------------------------------------------------------------------------
+# v6.2 FIX: Panel returns a dict; never writes to a widget-backed session key.
 # ============================================================================
 
 def render_qdwa_customization_panel() -> Dict[str, Any]:
-    """Comprehensive customization panel for QDWA visualizations."""
+    """Comprehensive customization panel for QDWA visualizations.
+
+    Returns a dict consumed directly by the caller. All widget keys are
+    seeded by ``init_widget_defaults()`` at the top of ``main()``.
+    """
+
+    def _reset_qdwa_defaults() -> None:
+        for k in (
+            "qdwa_cmap",
+            "qdwa_post_font_size",
+            "qdwa_post_title_size",
+            "qdwa_post_font_family",
+            "qdwa_post_sankey_pad",
+            "qdwa_post_sankey_thick",
+            "qdwa_post_sankey_opacity",
+            "qdwa_post_bar_text_pos",
+            "qdwa_post_bar_text_size",
+        ):
+            st.session_state[k] = _MT_WIDGET_DEFAULTS[k]
+
     with st.expander("🎨 QDWA Visualization Customization", expanded=False):
         st.markdown("**Colormap & Theme**")
         col1, col2 = st.columns(2)
         with col1:
-            qdwa_cmap = st.selectbox(
+            # Widget with key="qdwa_cmap" owns that session key.
+            qdwa_cmap_selected = st.selectbox(
                 "Colormap (QDWA)",
                 options=list(SUPPORTED_COLORMAPS.keys()),
-                index=list(SUPPORTED_COLORMAPS.keys()).index(st.session_state.get("qdwa_cmap", "viridis")) if st.session_state.get("qdwa_cmap", "viridis") in SUPPORTED_COLORMAPS else 0,
-                key="qdwa_post_cmap"
+                key="qdwa_cmap",
             )
-            st.session_state["qdwa_cmap"] = qdwa_cmap
         with col2:
             st.checkbox("Reverse Colormap", key="qdwa_cmap_reverse")
 
         st.markdown("**Typography**")
         col3, col4, col5 = st.columns(3)
         with col3:
-            st.slider("Font Size", 8, 24, 11, key="qdwa_post_font_size")
+            st.slider("Font Size", 8, 24, key="qdwa_post_font_size")
         with col4:
-            st.slider("Title Size", 12, 32, 15, key="qdwa_post_title_size")
+            st.slider("Title Size", 12, 32, key="qdwa_post_title_size")
         with col5:
-            st.selectbox("Font Family", [
-                "Inter, Segoe UI, Roboto, sans-serif", "Arial, Helvetica, sans-serif",
-                "Georgia, serif", "Courier New, monospace"
-            ], key="qdwa_post_font_family")
+            st.selectbox(
+                "Font Family",
+                [
+                    "Inter, Segoe UI, Roboto, sans-serif",
+                    "Arial, Helvetica, sans-serif",
+                    "Georgia, serif",
+                    "Courier New, monospace",
+                ],
+                key="qdwa_post_font_family",
+            )
 
         st.markdown("**Sankey Settings**")
         col6, col7, col8 = st.columns(3)
-        with col6: st.slider("Node Padding", 5, 50, 20, key="qdwa_post_sankey_pad")
-        with col7: st.slider("Node Thickness", 10, 40, 25, key="qdwa_post_sankey_thick")
-        with col8: st.slider("Link Opacity", 0.1, 1.0, 0.4, key="qdwa_post_sankey_opacity")
+        with col6:
+            st.slider("Node Padding", 5, 50, key="qdwa_post_sankey_pad")
+        with col7:
+            st.slider("Node Thickness", 10, 40, key="qdwa_post_sankey_thick")
+        with col8:
+            st.slider("Link Opacity", 0.1, 1.0, step=0.05,
+                      key="qdwa_post_sankey_opacity")
 
         st.markdown("**Bar Chart Settings**")
         col9, col10 = st.columns(2)
-        with col9: st.selectbox("Text Position", ["outside", "inside", "auto", "none"], key="qdwa_post_bar_text_pos")
-        with col10: st.slider("Text Size", 6, 16, 10, key="qdwa_post_bar_text_size")
+        with col9:
+            st.selectbox(
+                "Text Position",
+                ["outside", "inside", "auto", "none"],
+                key="qdwa_post_bar_text_pos",
+            )
+        with col10:
+            st.slider("Text Size", 6, 16, key="qdwa_post_bar_text_size")
 
-        # Preview
-        preview_cmap = st.session_state.get("qdwa_cmap", "viridis")
+        # --- Inline colormap preview (uses widget return value) ---
+        preview_cmap = qdwa_cmap_selected
         colors = get_colormap_colors(preview_cmap.replace("_r", ""), 10)
         st.markdown(
-            f"<div style='display:flex; height:15px; border-radius:3px; overflow:hidden;'>"
+            "<div style='display:flex; height:15px; border-radius:3px; "
+            "overflow:hidden;'>"
             + "".join(f"<div style='flex:1; background:{c};'></div>" for c in colors)
-            + "</div>", unsafe_allow_html=True
+            + "</div>",
+            unsafe_allow_html=True,
         )
 
-        if st.button("🔄 Reset to Defaults", key="qdwa_post_reset"):
-            st.session_state["qdwa_cmap"] = "viridis"
-            st.rerun()
+        st.button(
+            "🔄 Reset to Defaults",
+            key="qdwa_post_reset",
+            on_click=_reset_qdwa_defaults,
+        )
 
     return {
-        "cmap": st.session_state.get("qdwa_cmap", "viridis"),
+        "cmap": qdwa_cmap_selected,
         "font_size": st.session_state.get("qdwa_post_font_size", 11),
         "title_size": st.session_state.get("qdwa_post_title_size", 15),
-        "font_family": st.session_state.get("qdwa_post_font_family", "Inter, Segoe UI, Roboto, sans-serif"),
+        "font_family": st.session_state.get(
+            "qdwa_post_font_family", "Inter, Segoe UI, Roboto, sans-serif"
+        ),
         "sankey_node_pad": st.session_state.get("qdwa_post_sankey_pad", 20),
         "sankey_node_thickness": st.session_state.get("qdwa_post_sankey_thick", 25),
         "sankey_link_opacity": st.session_state.get("qdwa_post_sankey_opacity", 0.4),
@@ -6731,7 +6862,7 @@ def apply_qdwa_pub_style(fig, is_axial=True):
     ml = st.session_state.get("qdwa_margin_l", 60)
     mr = st.session_state.get("qdwa_margin_r", 40)
     tl = st.session_state.get("qdwa_tick_len", 5)
-    
+
     fig.update_layout(
         font=dict(family=font, size=tick_size, color="#1e293b"),
         title_font=dict(family=font, size=title_size, color="#0f172a"),
@@ -6745,7 +6876,7 @@ def apply_qdwa_pub_style(fig, is_axial=True):
     return fig
 
 # ============================================================================
-# QDWA CHART RENDERING FUNCTIONS (Updated with scale and styling)
+# QDWA CHART RENDERING FUNCTIONS
 # ============================================================================
 
 def render_qdwa_bar(df: pd.DataFrame, scale: List[str]):
@@ -6755,7 +6886,7 @@ def render_qdwa_bar(df: pd.DataFrame, scale: List[str]):
     border_colors = []
     border_widths = []
     lw = st.session_state.get("qdwa_line_width", 1.5)
-    
+
     for _, row in sorted_df.iterrows():
         colors.append(row["Color"])
         if row["Is Major"]:
@@ -6764,23 +6895,23 @@ def render_qdwa_bar(df: pd.DataFrame, scale: List[str]):
         else:
             border_colors.append(row["Color"])
             border_widths.append(lw)
-            
+
     fig = go.Figure(go.Bar(
         x=sorted_df["Weight"], y=sorted_df["Short Name"], orientation="h",
         marker_color=colors, marker_line_color=border_colors, marker_line_width=border_widths,
         text=sorted_df["Weight"].map("{:.1%}".format), textposition="outside",
         hovertemplate="<b>%{y}</b><br>Weight: %{x:.4f}<extra></extra>",
     ))
-    
+
     major_row = sorted_df[sorted_df["Is Major"]].iloc[0]
     fig.add_annotation(x=major_row["Weight"], y=major_row["Short Name"], text="⭐ MAJOR",
                        showarrow=True, arrowhead=2, ax=40, ay=0,
                        font=dict(size=13, color="#FFD700", family="sans-serif"))
-    
+
     fig.update_layout(title="QDWA Category Weights (Major Highlighted ⭐)",
                       xaxis_title="Weight", xaxis_range=[0, max(sorted_df["Weight"]) * 1.35],
                       height=300, showlegend=False)
-    
+
     st.plotly_chart(apply_qdwa_pub_style(fig), use_container_width=True)
 
 def render_qdwa_donut(df: pd.DataFrame, scale: List[str]):
@@ -6789,10 +6920,9 @@ def render_qdwa_donut(df: pd.DataFrame, scale: List[str]):
     weights = list(df["Weight"])
     colors = list(df["Color"])
     major_cat = df.loc[df["Is Major"], "Short Name"].iloc[0]
-    
-    # Explode the major slice
+
     pull = [0.12 if c == major_cat else 0 for c in cats]
-    
+
     fig = go.Figure(go.Pie(
         labels=[f"{c}\n({w:.1%})" for c, w in zip(cats, weights)],
         values=weights,
@@ -6802,14 +6932,14 @@ def render_qdwa_donut(df: pd.DataFrame, scale: List[str]):
         textfont=dict(size=13),
         hovertemplate="<b>%{label}</b><br>Weight: %{value:.4f}<extra></extra>",
     ))
-    
+
     fig.add_annotation(
         text=f"⭐ {major_cat}",
         x=0.5, y=0.5,
         font=dict(size=16, color="#FFD700", family="sans-serif"),
         showarrow=False,
     )
-    
+
     fig.update_layout(
         title="QDWA Weight Distribution (Donut)",
         height=400,
@@ -6817,7 +6947,7 @@ def render_qdwa_donut(df: pd.DataFrame, scale: List[str]):
         showlegend=True,
         legend=dict(font=dict(size=12)),
     )
-    
+
     st.plotly_chart(apply_qdwa_pub_style(fig, is_axial=False), use_container_width=True)
 
 def render_qdwa_radar(df: pd.DataFrame, scale: List[str]):
@@ -6826,15 +6956,13 @@ def render_qdwa_radar(df: pd.DataFrame, scale: List[str]):
     weights = list(df["Weight"])
     colors = list(df["Color"])
     n = len(cats)
-    
-    # Close the polygon
+
     theta = np.linspace(0, 2 * np.pi, n, endpoint=False).tolist()
     weights_closed = weights + [weights[0]]
     theta_closed = theta + [theta[0]]
-    
+
     fig = go.Figure()
-    
-    # Filled area
+
     fig.add_trace(go.Scatterpolar(
         r=weights_closed,
         theta=theta_closed,
@@ -6844,8 +6972,7 @@ def render_qdwa_radar(df: pd.DataFrame, scale: List[str]):
         name="Weight profile",
         hovertemplate="<b>%{theta}</b><br>Weight: %{r:.4f}<extra></extra>",
     ))
-    
-    # Individual markers with category colors
+
     for i in range(n):
         fig.add_trace(go.Scatterpolar(
             r=[weights[i]],
@@ -6859,7 +6986,7 @@ def render_qdwa_radar(df: pd.DataFrame, scale: List[str]):
             showlegend=False,
             hoverinfo="skip",
         ))
-    
+
     fig.update_layout(
         polar=dict(
             radialaxis=dict(visible=True, range=[0, max(weights) * 1.4]),
@@ -6870,22 +6997,19 @@ def render_qdwa_radar(df: pd.DataFrame, scale: List[str]):
         height=420,
         margin=dict(l=60, r=60, t=50, b=40),
     )
-    
+
     st.plotly_chart(apply_qdwa_pub_style(fig, is_axial=False), use_container_width=True)
 
 def render_qdwa_sankey(df: pd.DataFrame, query: str, scale: List[str]):
     """Sankey diagram: Query → 4 Categories."""
-    # Node labels
     labels = [f"Query:\n{query[:40]}…"] + list(df["Short Name"])
-    # Source / target / value indices
     sources = [0, 0, 0, 0]
     targets = [1, 2, 3, 4]
     values = list(df["Weight"])
     colors = list(df["Color"])
-    
+
     node_colors = ["#6366F1"] + colors
-    
-    # Convert hex to rgba strings with alpha
+
     link_colors = []
     for c in colors:
         if isinstance(c, str) and c.startswith('#') and len(c) == 7:
@@ -6895,7 +7019,7 @@ def render_qdwa_sankey(df: pd.DataFrame, query: str, scale: List[str]):
             link_colors.append(f"rgba({r},{g},{b},0.5)")
         else:
             link_colors.append(c)
-    
+
     fig = go.Figure(data=[go.Sankey(
         arrangement="snap",
         node=dict(
@@ -6908,14 +7032,14 @@ def render_qdwa_sankey(df: pd.DataFrame, query: str, scale: List[str]):
             value=values, color=link_colors,
         ),
     )])
-    
+
     fig.update_layout(
         title="QDWA Weight Flow (Query → Categories)",
         height=350,
         margin=dict(l=10, r=10, t=40, b=10),
         font=dict(size=13),
     )
-    
+
     st.plotly_chart(apply_qdwa_pub_style(fig, is_axial=False), use_container_width=True)
 
 
@@ -6923,17 +7047,14 @@ def render_qdwa_sankey_twoway(query: str, df: pd.DataFrame, scale: List[str]):
     """
     Two-Way Sankey: Query -> Extracted Terms -> 4 Categories -> Final Weights
     """
-    # 1. Extract terms from query
     terms = extract_battery_concepts_from_text(query.lower())
     if not terms:
-        terms = ["general_battery_optimization"] # Fallback
+        terms = ["general_battery_optimization"]
 
-    # 2. Compute soft memberships for each term
     term_memberships = {}
     for t in terms:
         term_memberships[t] = soft_category_membership(t)
 
-    # 3. Build Nodes
     labels = [f"Query:\n{query[:35]}..."]
     term_labels = [t.replace("_", " ").title() for t in terms]
     labels.extend(term_labels)
@@ -6941,23 +7062,20 @@ def render_qdwa_sankey_twoway(query: str, df: pd.DataFrame, scale: List[str]):
     labels.extend(cat_labels)
     labels.append("Final\nWeights")
 
-    # 4. Build Links & Colors
     sources, targets, values, link_colors = [], [], [], []
 
-    # Layer 1: Query -> Terms
     q_idx = 0
     for i, t in enumerate(terms):
         sources.append(q_idx)
         targets.append(1 + i)
         values.append(1.0 / len(terms))
-        link_colors.append("rgba(99, 102, 241, 0.3)") # Indigo
+        link_colors.append("rgba(99, 102, 241, 0.3)")
 
-    # Layer 2: Terms -> Categories (Using soft membership)
     for i, t in enumerate(terms):
         mems = term_memberships[t]
         for j, cat_key in enumerate(FOUR_CATEGORIES):
             val = mems.get(cat_key, 0)
-            if val > 0.05: # Threshold for visibility
+            if val > 0.05:
                 sources.append(1 + i)
                 targets.append(1 + len(terms) + j)
                 values.append(val)
@@ -6968,7 +7086,6 @@ def render_qdwa_sankey_twoway(query: str, df: pd.DataFrame, scale: List[str]):
                 else:
                     link_colors.append("rgba(100,100,100,0.4)")
 
-    # Layer 3: Categories -> Final Weights
     for j, (_, row) in enumerate(df.iterrows()):
         sources.append(1 + len(terms) + j)
         targets.append(1 + len(terms) + len(FOUR_CATEGORIES))
@@ -6980,19 +7097,17 @@ def render_qdwa_sankey_twoway(query: str, df: pd.DataFrame, scale: List[str]):
         else:
             link_colors.append("rgba(100,100,100,0.7)")
 
-    # Node Colors
-    node_colors = ["#6366F1"] + ["#94A3B8"]*len(terms) + list(df["Color"]) + ["#10B981"]
+    node_colors = ["#6366F1"] + ["#94A3B8"] * len(terms) + list(df["Color"]) + ["#10B981"]
 
     fig = go.Figure(data=[go.Sankey(
         arrangement="snap",
-        node=dict(pad=20, thickness=25, label=labels, color=node_colors, 
+        node=dict(pad=20, thickness=25, label=labels, color=node_colors,
                   line=dict(color="#fff", width=1)),
         link=dict(source=sources, target=targets, value=values, color=link_colors)
     )])
 
-    # CRITICAL FIX: Sankey node labels inherit from layout font, NOT trace textfont
     fig.update_layout(
-        title_text="QDWA Two-Way Flow: Query → Terms → Categories → Weights", 
+        title_text="QDWA Two-Way Flow: Query → Terms → Categories → Weights",
         height=500,
         font=dict(size=13, color="#1e293b")
     )
@@ -7006,11 +7121,10 @@ def render_qdwa_chord(df: pd.DataFrame, scale: List[str]):
     weights = list(df["Weight"])
     colors = list(df["Color"])
     n = len(cats)
-    
-    # --- Radial bar (chord approximation) ---
+
     theta = np.linspace(0, 2 * np.pi, n, endpoint=False)
     width = 2 * np.pi / n * 0.75
-    
+
     fig = go.Figure()
     for i in range(n):
         fig.add_trace(go.Barpolar(
@@ -7024,7 +7138,7 @@ def render_qdwa_chord(df: pd.DataFrame, scale: List[str]):
             hoverinfo="text",
             text=f"{cats[i]}: {weights[i]:.1%}",
         ))
-    
+
     fig.update_layout(
         polar=dict(
             radialaxis=dict(visible=False, range=[0, max(weights) * 1.3]),
@@ -7036,8 +7150,7 @@ def render_qdwa_chord(df: pd.DataFrame, scale: List[str]):
         margin=dict(l=40, r=40, t=50, b=40),
     )
     st.plotly_chart(apply_qdwa_pub_style(fig, is_axial=False), use_container_width=True)
-    
-    # --- Heatmap of weight decomposition ---
+
     st.markdown("#### Category Interaction Heatmap")
     render_qdwa_heatmap(df, scale)
 
@@ -7049,13 +7162,12 @@ def render_qdwa_heatmap(df: pd.DataFrame, scale: List[str]):
       - Row 3: Keyword hit counts (normalized)
     """
     cats = list(df["Short Name"])
-    # Build a 3×4 matrix
     matrix = np.array([
         list(df["Weight"]),
         list(df["Raw Similarity"]),
-        list(df["Keyword Hits"] / (df["Keyword Hits"].max() + 1)),  # normalized
+        list(df["Keyword Hits"] / (df["Keyword Hits"].max() + 1)),
     ])
-    
+
     fig = go.Figure(go.Heatmap(
         z=matrix,
         x=cats,
@@ -7069,22 +7181,21 @@ def render_qdwa_heatmap(df: pd.DataFrame, scale: List[str]):
         showscale=True,
         colorbar=dict(title="Value"),
     ))
-    
-    # Highlight major category column with a vertical rectangle
+
     major_idx = df.index[df["Is Major"]][0]
     fig.add_vrect(
         x0=major_idx - 0.45, x1=major_idx + 0.45,
         line_width=3, line_color="#FFD700",
         fillcolor="#FFD700", opacity=0.08,
     )
-    
+
     fig.update_layout(
         title="QDWA Weight Decomposition Heatmap (⭐ = major column)",
         height=260,
         margin=dict(l=140, r=40, t=50, b=30),
         xaxis_side="bottom",
     )
-    
+
     st.plotly_chart(apply_qdwa_pub_style(fig), use_container_width=True)
 
 # ============================================================================
@@ -7173,7 +7284,6 @@ class FallbackAnalyzer(LLMQueryAnalyzer):
         primary = max(problem_scores, key=problem_scores.get) if sum(problem_scores.values()) > 0 else BatteryProblem.GENERAL
         secondary = [p for p, s in sorted(problem_scores.items(), key=lambda x: -x[1]) if s > 0 and p != primary][:2]
 
-        # QDWA: compute W, c, K
         W, c, K = compute_query_category_weights(query, primary_problem=primary)
 
         explicitly_mentioned = []
@@ -7270,7 +7380,6 @@ class OpenAIQueryAnalyzer(LLMQueryAnalyzer):
             self._pending_new_relationships = parsed.get("new_relationships", [])
             problem_map = {p.value: p for p in BatteryProblem}
             primary = problem_map.get(parsed.get("primary_problem", "general"), BatteryProblem.GENERAL)
-            # QDWA
             W, c, K = compute_query_category_weights(query, primary_problem=primary)
             explicitly_mentioned = [c for c in parsed.get("explicitly_mentioned", []) if c in ontology.concepts]
             inferred = [c for c in parsed.get("inferred_concepts", []) if c in ontology.concepts and c not in explicitly_mentioned]
@@ -7297,8 +7406,7 @@ class LocalLLMQueryAnalyzer(LLMQueryAnalyzer):
         self._loaded = False
         self._pending_new_concepts = []
         self._pending_new_relationships = []
-    
-    #
+
     def _load_model(self):
         if self._loaded:
             return
@@ -7306,23 +7414,21 @@ class LocalLLMQueryAnalyzer(LLMQueryAnalyzer):
             if pipeline is None:
                 st.warning("transformers not installed; cannot use local LLM.")
                 return
-            
+
             st.info(f"⏳ Loading local model: `{self.model_name}`… (first run may take 1–2 min)")
             tokenizer = AutoTokenizer.from_pretrained(self.model_name)
-            
+
             load_kwargs: Dict[str, Any] = {}
             if torch.cuda.is_available():
                 load_kwargs["torch_dtype"] = torch.float16
                 load_kwargs["device_map"] = "auto"
-                # ✅ CORRECT WAY: Pass the config object, not the boolean flag
                 load_kwargs["quantization_config"] = BitsAndBytesConfig(load_in_8bit=True)
             else:
                 load_kwargs["torch_dtype"] = torch.float32
                 load_kwargs["device_map"] = None
-                
-            # Now **load_kwargs safely contains quantization_config instead of load_in_8bit
+
             model = AutoModelForCausalLM.from_pretrained(self.model_name, **load_kwargs)
-            
+
             self._pipeline = pipeline(
                 "text-generation",
                 model=model,
@@ -7334,16 +7440,14 @@ class LocalLLMQueryAnalyzer(LLMQueryAnalyzer):
             )
             self._loaded = True
             st.success(f"✅ Model `{self.model_name}` loaded!")
-            
+
         except Exception as e:
             st.warning(f"⚠️ Failed to load local model `{self.model_name}`: {e}")
             self._loaded = False
         finally:
             gc.collect()
             if torch.cuda.is_available():
-                torch.cuda.empty_cache()      
-                
-    
+                torch.cuda.empty_cache()
 
     def is_available(self) -> bool:
         self._load_model()
@@ -7591,12 +7695,10 @@ class PriorityGuidedSubgraphExtractor:
         if not seed_nodes:
             seed_nodes = {n for n, d in self.full_graph.nodes(data=True) if d.get("priority_score", 0) >= 0.3}
 
-        # ---- QDWA: category-annealed personalization and edge re-weighting ----
         W = getattr(analysis, "category_weights", None) or {k: 0.25 for k in FOUR_CATEGORIES}
         k_star = max(W, key=W.get)
         rho, eta, kappa = 0.15, 0.5, 0.5
 
-        # Eq. (9): edge re-weighting on a copy
         G2 = self.full_graph.copy()
         for u, v, d in G2.edges(data=True):
             cu, cv = categorize_battery_concept(u), categorize_battery_concept(v)
@@ -7605,7 +7707,6 @@ class PriorityGuidedSubgraphExtractor:
                 boost += kappa * W.get(cv, 0.0)
             d["weight"] = d.get("weight", 1.0) * boost
 
-        # Eq. (8): category-annealed personalization
         personalization = {
             n: (1.0 if n in seed_nodes else 0.0)
             + rho * W.get(categorize_battery_concept(n), 0.0)
@@ -7616,7 +7717,6 @@ class PriorityGuidedSubgraphExtractor:
         except Exception:
             ppr_scores = {n: 1.0 / len(G2) for n in G2}
 
-        # Store back on original graph
         for node in self.full_graph.nodes():
             ppr = ppr_scores.get(node, 0.0)
             srs = self._compute_semantic_resonance(node, query_embedding) if query_embedding is not None else 0.5
@@ -7641,7 +7741,6 @@ class PriorityGuidedSubgraphExtractor:
         selected_nodes = {n for n, d in self.full_graph.nodes(data=True) if d.get("priority_score", 0) >= threshold}
         selected_nodes.update(seed_nodes)
 
-        # ---- QDWA: entropy-gated K-hop + bridge preservation (Eqs. 7, 11) ----
         K = max(1, getattr(analysis, "subgraph_depth", 2))
         frontier = set(selected_nodes)
         for _ in range(K - 1):
@@ -7792,7 +7891,6 @@ import plotly.graph_objects as go
 import plotly.express as px
 import hashlib
 
-# The four categories mapped to ontology concept groups
 QDWA_CATEGORIES = {
     "Hardware & System Architecture": [
         "battery_chemistry", "lipo_battery", "liion_battery", "solid_state_battery",
@@ -7823,10 +7921,10 @@ CATEGORY_SHORT_NAMES = {
 }
 
 CATEGORY_COLORS = {
-    "Hardware & System Architecture":          "#3B82F6",  # blue
-    "Flight Control & Trajectory Optimization": "#F59E0B",  # amber
-    "Thermal Management":                       "#EF4444",  # red
-    "Charging & Maintenance Protocols":         "#10B981",  # emerald
+    "Hardware & System Architecture":          "#3B82F6",
+    "Flight Control & Trajectory Optimization": "#F59E0B",
+    "Thermal Management":                       "#EF4444",
+    "Charging & Maintenance Protocols":         "#10B981",
 }
 
 
@@ -7856,7 +7954,6 @@ class QDWAWeightAllocator:
         self._last_keyword_hits: Dict[str, int] = {}
         self._last_query_embedding: Optional[np.ndarray] = None
 
-    # ------------------------------------------------------------------
     def build_centroids(self) -> None:
         """Pre-compute category centroid embeddings."""
         self._centroids = {}
@@ -7867,7 +7964,6 @@ class QDWAWeightAllocator:
                 if node is not None and node.embedding is not None:
                     embeddings.append(node.embedding)
                 else:
-                    # Fallback: encode the canonical name
                     emb = self.encoder.encode(
                         key.replace("_", " "), normalize_embeddings=True
                     )
@@ -7877,14 +7973,12 @@ class QDWAWeightAllocator:
                 centroid = centroid / (np.linalg.norm(centroid) + 1e-9)
                 self._centroids[cat_name] = centroid
 
-    # ------------------------------------------------------------------
     @property
     def centroids(self) -> Dict[str, np.ndarray]:
         if self._centroids is None:
             self.build_centroids()
         return self._centroids
 
-    # ------------------------------------------------------------------
     def compute_weights(self, query: str) -> Dict[str, float]:
         """
         Full QDWA pipeline: embed query → score → softmax → boost → normalize.
@@ -7894,31 +7988,26 @@ class QDWAWeightAllocator:
         query_emb = self.encoder.encode(query, normalize_embeddings=True)
         self._last_query_embedding = query_emb
 
-        # Stage 3 — raw cosine similarities
         raw_scores = {}
         for cat_name, centroid in self.centroids.items():
-            sim = float(np.dot(query_emb, centroid))  # both L2-normalized
+            sim = float(np.dot(query_emb, centroid))
             raw_scores[cat_name] = sim
         self._last_raw_scores = raw_scores
 
-        # Stage 4 — temperature-scaled softmax
         temp_scaled = {k: v / self.temperature for k, v in raw_scores.items()}
         max_val = max(temp_scaled.values())
         exp_vals = {k: np.exp(v - max_val) for k, v in temp_scaled.items()}
         total_exp = sum(exp_vals.values())
         weights = {k: v / total_exp for k, v in exp_vals.items()}
 
-        # Stage 5 — keyword boosting
         query_lower = query.lower()
         keyword_hits = {}
         for cat_name, concept_keys in QDWA_CATEGORIES.items():
             hits = 0
             for key in concept_keys:
                 node = self.ontology.concepts.get(key)
-                # Check canonical name
                 if key.replace("_", " ") in query_lower:
                     hits += 1
-                # Check synonyms
                 if node:
                     for syn in node.synonyms:
                         if syn in query_lower:
@@ -7936,9 +8025,6 @@ class QDWAWeightAllocator:
         self._last_weights = final_weights
         return final_weights
 
-    # ------------------------------------------------------------------
-    # Accessors for visualization code
-    # ------------------------------------------------------------------
     @property
     def weights(self) -> Dict[str, float]:
         return self._last_weights
@@ -7981,9 +8067,6 @@ class QDWAWeightAllocator:
         return pd.DataFrame(rows)
 
 
-# ------------------------------------------------------------------
-# Cached initializer
-# ------------------------------------------------------------------
 @st.cache_resource(show_spinner="Building QDWA weight allocator…")
 def init_qdwa_allocator(
     _ontology: "DomainOntology",
@@ -8001,16 +8084,12 @@ def init_qdwa_allocator(
     return allocator
 
 
-# ------------------------------------------------------------------
-# Rendering helpers
-# ------------------------------------------------------------------
 def run_qdwa_and_show_weights(qdwa: QDWAWeightAllocator, query: str):
     """Compute weights and render the numeric weight table."""
     weights = qdwa.compute_weights(query)
     df = qdwa.weights_dataframe()
     major_cat, major_w = qdwa.get_major_category()
 
-    # --- Numeric display ---
     st.markdown("### 🎯 QDWA Category Weights")
     cols = st.columns(4)
     for i, row in df.iterrows():
@@ -8037,7 +8116,6 @@ def run_qdwa_and_show_weights(qdwa: QDWAWeightAllocator, query: str):
                 unsafe_allow_html=True,
             )
 
-    # --- Tidy table ---
     with st.expander("📊 Weight detail table", expanded=False):
         show_df = df.drop(columns=["Color"]).copy()
         show_df["Weight"] = show_df["Weight"].map("{:.4f}".format)
@@ -8046,8 +8124,11 @@ def run_qdwa_and_show_weights(qdwa: QDWAWeightAllocator, query: str):
 
     return df, major_cat, major_w
 
+
 # ============================================================================
 # ENHANCED render_qdwa_tab (Methodology + Math + Customization)
+# ----------------------------------------------------------------------------
+# v6.2 FIX: consume the panel's returned dict instead of reading a widget key.
 # ============================================================================
 
 def render_qdwa_tab(qdwa: QDWAWeightAllocator, query: str, metrics: RunMetricsLogger):
@@ -8055,16 +8136,16 @@ def render_qdwa_tab(qdwa: QDWAWeightAllocator, query: str, metrics: RunMetricsLo
     metrics.start_step("QDWA weight computation")
     df, major_cat, major_w = run_qdwa_and_show_weights(qdwa, query)
     metrics.end_step(extra={"major": major_cat, "major_weight": major_w})
-    
+
     # --- Customization Panel ---
-    render_qdwa_customization_panel()
-    
+    post_params = render_qdwa_customization_panel()
+
     # --- Methodology & Category Dominance Highlight ---
     st.markdown("### 🧠 Methodology & Category Dominance")
     W = qdwa.weights
     H = -sum(w * math.log(w) for w in W.values() if w > 1e-12)
     c = float(np.clip(1.0 - H / math.log(4), 0.0, 1.0))
-    
+
     col_m1, col_m2 = st.columns([2, 1])
     with col_m1:
         if c > 0.6:
@@ -8072,7 +8153,7 @@ def render_qdwa_tab(qdwa: QDWAWeightAllocator, query: str, metrics: RunMetricsLo
             <div style="padding: 15px; border-radius: 8px; background: rgba(16, 185, 129, 0.1); border-left: 5px solid #10B981;">
                 <h4 style="margin:0; color:#065F46;">🎯 Major Category Focus (Specialized)</h4>
                 <p style="margin:5px 0 0 0; color:#047857;">
-                    The query is heavily dominated by <b>{major_cat}</b> ({major_w:.1%}). 
+                    The query is heavily dominated by <b>{major_cat}</b> ({major_w:.1%}).
                     The system will prioritize deep-dive experts and causal chains in this domain.
                 </p>
             </div>
@@ -8098,68 +8179,67 @@ def render_qdwa_tab(qdwa: QDWAWeightAllocator, query: str, metrics: RunMetricsLo
     with col_m2:
         st.metric("Concentration Index ($c$)", f"{c:.3f}")
         st.caption("1.0 = Single Category\n0.0 = Uniform Plural")
-        
+
     st.markdown("---")
-    
-    # --- Chart selector ---
-    chart_options = ["📊 Bar Chart", "🍩 Donut Chart", "🕸️ Radar / Spider", 
+
+    chart_options = ["📊 Bar Chart", "🍩 Donut Chart", "🕸️ Radar / Spider",
                      "🔄 Sankey Flow (Simple)", "🌊 Two-Way Sankey (Terms→Cats)",
                      "🎛️ Chord (Radial)", "🔥 Heatmap", "📈 All Charts (Gallery)"]
     chosen = st.selectbox("Select visualization", chart_options, index=0)
     metrics.start_step(f"QDWA chart: {chosen}")
-    
-    scale = plotly_continuous_scale(st.session_state.get("qdwa_cmap", "viridis"))
-    
-    if "Bar" in chosen: 
+
+    # Use panel's returned colormap, never the raw widget-backed key.
+    scale = plotly_continuous_scale(post_params.get("cmap", "viridis"))
+
+    if "Bar" in chosen:
         render_qdwa_bar(df, scale)
-    elif "Donut" in chosen: 
+    elif "Donut" in chosen:
         render_qdwa_donut(df, scale)
-    elif "Radar" in chosen: 
+    elif "Radar" in chosen:
         render_qdwa_radar(df, scale)
-    elif "Sankey" in chosen and "Two-Way" not in chosen: 
+    elif "Sankey" in chosen and "Two-Way" not in chosen:
         render_qdwa_sankey(df, query, scale)
     elif "Two-Way" in chosen:
         render_qdwa_sankey_twoway(query, df, scale)
-    elif "Chord" in chosen: 
+    elif "Chord" in chosen:
         render_qdwa_chord(df, scale)
-    elif "Heatmap" in chosen: 
+    elif "Heatmap" in chosen:
         render_qdwa_heatmap(df, scale)
     elif "Gallery" in chosen:
         c1, c2 = st.columns(2)
-        with c1: 
+        with c1:
             render_qdwa_bar(df, scale)
-        with c2: 
+        with c2:
             render_qdwa_donut(df, scale)
         render_qdwa_radar(df, scale)
         c3, c4 = st.columns(2)
-        with c3: 
+        with c3:
             render_qdwa_sankey(df, query, scale)
-        with c4: 
+        with c4:
             render_qdwa_heatmap(df, scale)
     metrics.end_step()
-    
-    # --- Robust Mathematical Explanation ---
+
     with st.expander("🧮 QDWA Mathematical Framework (Robust Explanation)", expanded=False):
         st.markdown(r"""
         #### 🧮 QDWA Mathematical Framework
         The Query Distillation & Weighted Allocation (QDWA) strategy maps a natural language query $\mathbf{q}$ to a 4-dimensional weight vector $\mathbf{W} = [\alpha_1, \alpha_2, \alpha_3, \alpha_4]$ representing relevance to Hardware, Flight Control, Thermal, and Maintenance domains.
-        
+
         **Stage 1: Query Embedding**
         $$ \mathbf{e}_q = f_{\text{enc}}(\mathbf{q}) \in \mathbb{R}^d $$
         *Intuition:* The query is mapped to a dense semantic vector using a SentenceTransformer.
-        
+
         **Stage 2: Category Centroids**
         $$ \mathbf{e}_{c_i} = \frac{1}{|S_i|} \sum_{j \in S_i} \mathbf{e}_j, \quad \hat{\mathbf{e}}_{c_i} = \frac{\mathbf{e}_{c_i}}{\|\mathbf{e}_{c_i}\|_2} $$
         *Intuition:* Each category is represented by the normalized mean of its seed concept embeddings.
-        
+
         **Stage 3: Cosine Similarity & Temperature Softmax**
         $$ s_i = \hat{\mathbf{e}}_q \cdot \hat{\mathbf{e}}_{c_i}, \quad \alpha_i = \frac{\exp(s_i / \tau)}{\sum_{j=1}^4 \exp(s_j / \tau)} $$
         *Intuition:* $\tau$ (temperature) controls the "sharpness" of the distribution. Low $\tau$ yields a one-hot-like distribution (strong major category), while high $\tau$ yields a uniform distribution (plural).
-        
+
         **Stage 4: Keyword Evidence Boost**
         $$ \alpha_i^{\text{final}} = \frac{\alpha_i (1 + \beta \cdot k_i)}{\sum_j \alpha_j (1 + \beta \cdot k_j)} $$
         *Intuition:* $\beta$ (boost) amplifies categories where exact domain keywords $k_i$ are found in the query, grounding the semantic similarity in explicit terminology.
-        
+
         **Stage 5: Concentration & Routing Depth**
         $$ H(\mathbf{W}) = -\sum_{i=1}^4 \alpha_i^{\text{final}} \log(\alpha_i^{\text{final}}), \quad c = 1 - \frac{H(\mathbf{W})}{\log 4} $$
         *Intuition:* $c \in [0, 1]$ measures category dominance. $c \to 1$ implies a single major category (specialized routing, depth $K=4$). $c \to 0$ implies a plural query (broad routing, depth $K=2$).
@@ -8172,11 +8252,10 @@ def render_qdwa_tab(qdwa: QDWAWeightAllocator, query: str, metrics: RunMetricsLo
         | $k_i$ (keyword hits) | {dict(qdwa.keyword_hits)} | Exact matches in category $i$ |
         | $c$ (concentration) | {c:.3f} | Dominance index |
         """)
-        
-    # --- Download weights as CSV ---
+
     csv = df.drop(columns=["Color"]).to_csv(index=False)
-    st.download_button("⬇️ Download weights CSV", csv.encode("utf-8"), 
-                       file_name=f"qdwa_weights_{hashlib.md5(query.encode()).hexdigest()[:8]}.csv", 
+    st.download_button("⬇️ Download weights CSV", csv.encode("utf-8"),
+                       file_name=f"qdwa_weights_{hashlib.md5(query.encode()).hexdigest()[:8]}.csv",
                        mime="text/csv")
 
 
@@ -8216,12 +8295,11 @@ def render_llm_query_panel(ontology: Any, expander: DynamicOntologyExpander, ful
 
     example_queries = [q for pdef in BATTERY_PROBLEM_DEFINITIONS.values() for q in pdef.example_queries[:1]]
     selected_example = st.sidebar.selectbox("Or select an example:", [""] + example_queries, key="example_query_select")
-    
-    # SYNC DEFAULT QUERY WITH QDWA TAB
+
     query = st.sidebar.text_area(
-        "Your question about drone battery optimization:", 
+        "Your question about drone battery optimization:",
         value=st.session_state.get('synced_query', "How does pre-heating affect battery performance in cold weather?"),
-        height=100, key="llm_query_input", 
+        height=100, key="llm_query_input",
         placeholder="e.g., How does pre-heating affect battery performance?"
     )
 
@@ -8229,7 +8307,6 @@ def render_llm_query_panel(ontology: Any, expander: DynamicOntologyExpander, ful
     if not submitted or not query.strip():
         return None
 
-    # --- GLOBAL QUERY SYNC ---
     st.session_state['synced_query'] = query
 
     factory = LLMQueryAnalyzerFactory()
@@ -8276,7 +8353,6 @@ def render_llm_query_panel(ontology: Any, expander: DynamicOntologyExpander, ful
         for b in mutations["bridges_created"]:
             st.sidebar.markdown(f"  - `{b['bridge']}` ← `{b['for']}`")
 
-    # ---- QDWA gauge rendering ----
     if analysis is not None and getattr(analysis, "category_weights", None):
         render_category_weight_gauge(
             analysis.category_weights, analysis.concentration, container=st.sidebar
@@ -8325,7 +8401,6 @@ def render_query_history() -> None:
 
 
 def render_analysis_details(analysis: QueryAnalysisResult) -> None:
-    # ---- QDWA gauge ----
     if analysis is not None and getattr(analysis, "category_weights", None):
         render_category_weight_gauge(analysis.category_weights, analysis.concentration)
 
@@ -9028,6 +9103,10 @@ def main() -> None:
         "Ontology-aware resolution | Query Distillation & Weighted Allocation (QDWA)"
     )
 
+    # v6.2 FIX: seed widget keys BEFORE any widget (sidebar or tab) is rendered.
+    # This is the only legal moment to write to a widget-backed session key.
+    init_widget_defaults()
+
     if 'ontology' not in st.session_state:
         st.session_state.ontology = DomainOntology()
     ontology = st.session_state.ontology
@@ -9397,29 +9476,24 @@ def main() -> None:
         cmap = st.session_state.get('cmap_name', 'viridis')
         has_reasoning = "ontology" in data
 
-        # ------------------------------------------------------------------
-        # UPDATED TAB ORDER: QDWA FIRST
-        # ------------------------------------------------------------------
         tab_names = [
-            "🎯 QDWA Weights",          # <--- MOVED TO FIRST
-            "📊 Visualization", 
-            "🧪 Distillation", 
-            "🎯 Research Directions", 
-            "✅ Validation", 
-            "📥 Export", 
-            "📈 Extra Viz", 
+            "🎯 QDWA Weights",
+            "📊 Visualization",
+            "🧪 Distillation",
+            "🎯 Research Directions",
+            "✅ Validation",
+            "📥 Export",
+            "📈 Extra Viz",
             "🔬 Advanced Analytics"
         ]
-        if has_reasoning: 
+        if has_reasoning:
             tab_names.append("🧠 Reasoning Dashboard")
         tab_names.append("🧠 Microtransformer #2")
         tab_names.append("🤖 LLM-Guided Q&A")
         tab_names.append("📊 Computational Metrics")
         tabs = st.tabs(tab_names)
 
-        # ------------------------------------------------------------------
-        # TAB 0: QDWA WEIGHTS (Immediate cognitive entry)
-        # ------------------------------------------------------------------
+        # TAB 0: QDWA WEIGHTS
         with tabs[0]:
             st.header("🎯 Query Distillation & Weighted Allocation")
             st.caption("Enter a query about drone battery optimization to see how QDWA allocates relevance weight across the four domain categories.")
@@ -9429,7 +9503,6 @@ def main() -> None:
                 st.session_state.qdwa_allocator = init_qdwa_allocator(ontology, encoder)
             qdwa = st.session_state.qdwa_allocator
 
-            # Default query synced with LLM sidebar
             qdwa_query = st.text_input(
                 "QDWA Query",
                 value=st.session_state.get('synced_query', "How does pre-heating affect battery performance in cold weather?"),
@@ -9441,9 +9514,7 @@ def main() -> None:
             else:
                 render_qdwa_tab(qdwa, qdwa_query.strip(), get_metrics_logger())
 
-        # ------------------------------------------------------------------
         # TAB 1: VISUALIZATION
-        # ------------------------------------------------------------------
         with tabs[1]:
             st.subheader("Interactive Concept Graph")
             if nx_graph.number_of_nodes() == 0:
@@ -9503,7 +9574,6 @@ def main() -> None:
                     font_size=radar_font
                 )
 
-        # --- Remaining tabs (unchanged, just shift indices) ---
         # TAB 2: Distillation
         with tabs[2]:
             st.subheader("Concept Distillation Efficiency")
