@@ -1,8 +1,8 @@
 S.N.,Category,Query,Acronym
 1, Thermal Management, Ways to mitigate the risk of thermal runaway in LiPo  batteries,CAT-TM1
 2, Thermal Management, "What are the most effective pre-heating strategies for drone batteries in sub-zero conditions, and
-how do they reduce internal resistance and voltage sag during takeoff?", CAT-TM2
-3, Thermal Management, Influence of forced post-flight cooling (active/passive) on the long-term capacity degradation and cycle life after high-C-rate discharge missions?,CAT-TM3
+how do they reduce internal resistance and voltage sag during takeoff?",  
+3, Thermal Management, Influence of forced post-flight cooling (active/passive) on the long-term capacity degradation and cycle life after high-C-rate discharge missions?,CAT-TM2
 4, Flight Control & Trajectory Optimization, Incorporating real-time wind data and altitude changes in A* algorithm and Genetic Algorithm to optimize energy consumption during a mission,CAT-FCTO1
 5, Flight Control & Trajectory Optimization, Planning the energy optimal drone path, CAT-FCTO2
 6, Flight Control & Trajectory Optimization, "How do cruising velocity, throttle modulation, and propeller-motor matching collectively minimize power 
