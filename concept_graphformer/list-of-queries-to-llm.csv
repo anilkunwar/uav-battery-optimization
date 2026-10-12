@@ -10,6 +10,6 @@ draw across different flight phases?", CAT-FCTO3,
 7,Hardware and System Architecture, Battery chemistry for high-power draw applications such as heavy lift freight,CAT-HSA1,
 8,Hardware and System Architecture, Battery Management System (BMS) for mitigating voltage sag and improve State of Health (SoH) estimation under varying payload weights,CAT-HSA2,
 9,Hardware and System Architecture, "Optimal balance between energy density (Wh/kg, C-rating, and airframe weight when selecting cells for a heavy-lift freight drone",CAT-HSA3,
-10,Charging and Maintenance Protocol,To extend battery cycle life through optimal charging and storage practices,CAT-CMP1,
+10,Charging and Maintenance Protocol,To extend battery cycle life through optimal charging and storage practices,CAT-CMP1, Too few concepts
 11,Charging and Maintenance Protocol,What is the optimal charge rate (C-rate) and storage SOC to maximize drone battery longevity?,CAT-CMP2,
 12,Charging and Maintenance Protocol, Effect of discharge thresholds and battery rotation strategiesin overall dronefleet battery health, CAT-CMP3,
