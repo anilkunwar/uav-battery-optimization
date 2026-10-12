@@ -8287,6 +8287,8 @@ def render_llm_query_panel(ontology: Any, expander: DynamicOntologyExpander, ful
             "BLOOM-560M (560M, multilingual)": "bigscience/bloom-560m",
             "Qwen2-0.5B-Instruct (500M, best JSON)": "Qwen/Qwen2-0.5B-Instruct",
             "Qwen2.5-0.5B-Instruct (500M, newest)": "Qwen/Qwen2.5-0.5B-Instruct",
+            "Qwen2.5-7B-Instruct (7.6B, high quality)": "Qwen/Qwen2.5-7B-Instruct",
+            "Qwen2.5-14B-Instruct (15B, max quality)": "Qwen/Qwen2.5-14B-Instruct",
         }
         model_display_names = list(LOCAL_LLM_REGISTRY.keys())
         selected_display = st.sidebar.selectbox("Select model:", options=model_display_names, index=0, key="local_model_select")
